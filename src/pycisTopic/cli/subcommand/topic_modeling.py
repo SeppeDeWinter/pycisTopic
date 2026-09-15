@@ -203,7 +203,7 @@ def binarize_cell_or_region_topic(args):
     smooth_topics = args.smooth_topics
     nbins = args.nbins
     cell_barcodes_filename = args.cell_barcodes_filename
-    region_ids_filename = args.region_ids_filename
+    region_ids_filename = args.regions_bed_filename
     output_prefix = args.output_prefix
     n_topics = args.n_topics
     out_dir = args.out_dir
