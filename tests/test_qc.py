@@ -112,11 +112,6 @@ class TestTssProfile:
         bad = np.mean([v for k, v in tss_enrichment.items() if k.startswith("bad")])
         assert good > 3 * bad
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Bug: the no-overlap check compares the shape to (0, 0), but an empty "
-        "intersection has columns, so a cryptic polars error is raised instead.",
-    )
     def test_no_overlap(self, fragments):
         tss = pl.DataFrame({"Chromosome": ["chrZ"], "TSS_start": [100], "Strand": ["+"]})
         with pytest.raises(ValueError, match="same chromosome name source"):

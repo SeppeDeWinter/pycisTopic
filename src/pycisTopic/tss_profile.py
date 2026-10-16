@@ -133,7 +133,7 @@ def get_tss_profile(
         .filter(
             # Filter out fragments which are located on chromosomes not found in
             # the TSS annotation.
-            pl.col("Chromosome").is_in(annotation_chromosomes)
+            pl.col("Chromosome").is_in(annotation_chromosomes.implode())
         )
         .select(
             # Only keep chromosomal position and CB.
@@ -164,7 +164,7 @@ def get_tss_profile(
         )
     )
 
-    if overlap_with_tss_df_pl.shape == (0, 0):
+    if overlap_with_tss_df_pl.height == 0:
         raise ValueError(
             "No overlap found between fragments and TSS annotation. Make sure both use the same chromosome name source."
         )
