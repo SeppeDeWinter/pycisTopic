@@ -468,7 +468,8 @@ def read_fragments_to_polars_df(
             min_column_count=4,
         )
         .lazy()
-        .rename({"Name": "CB", "Score": "CB_count"})
+        # Fragments files with only 4 columns do not have a Score (CB_count) column.
+        .rename({"Name": "CB", "Score": "CB_count"}, strict=False)
     )
 
     # If no "CB_count" is provided or "CB_count" column is ".", generate a

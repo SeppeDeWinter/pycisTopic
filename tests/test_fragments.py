@@ -81,10 +81,6 @@ class TestReadFragments:
             "CCC___s1",
         ]
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Bug: renaming the missing Score column fails for 4-column fragment files.",
-    )
     def test_four_column_fragments_are_counted(self, tmp_path):
         fragments = tmp_path / "fragments4.tsv"
         fragments.write_text(
