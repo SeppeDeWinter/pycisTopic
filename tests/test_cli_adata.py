@@ -1,0 +1,140 @@
+"""End-to-end tests of CLI commands that use the pycisTopic AnnData file."""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+
+import anndata
+import numpy as np
+import pandas as pd
+import pytest
+
+from pycisTopic.adata import create_anndata
+
+CLI = [sys.executable, "-m", "pycisTopic.cli.pycistopic"]
+
+
+def _run(*args):
+    result = subprocess.run([*CLI, *map(str, args)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    return result
+
+
+@pytest.fixture
+def adata_file(tmp_path, topic_model):
+    region_topic, cell_topic, region_names, cell_names = topic_model
+    groups = np.where(cell_topic[0] > np.quantile(cell_topic[0], 0.8), "high", "low")
+    adata = create_anndata(
+        cell_topic.T,
+        region_topic,
+        cell_names,
+        region_names,
+        obs=pd.DataFrame({"cell_type": groups}, index=cell_names),
+    )
+    path = tmp_path / "model.h5ad"
+    adata.write_h5ad(path)
+    return path
+
+
+def test_signature_enrichment(adata_file, tmp_path, topic_model):
+    _, _, region_names, _ = topic_model
+    bed_files = []
+    for i, regions in enumerate((region_names[:20], region_names[100:150])):
+        bed = tmp_path / f"signature{i}.bed"
+        bed.write_text(
+            "".join(r.replace(":", "\t").replace("-", "\t") + "\n" for r in regions)
+        )
+        bed_files.append(bed)
+
+    out1 = tmp_path / "out1.h5ad"
+    _run("signature_enrichment", "-a", adata_file, "-n", "s0", "-s", bed_files[0], "-o", out1)
+    adata = anndata.read_h5ad(out1)
+    assert adata.obsm["AUCell"].shape == (adata.n_obs, 1)
+    assert list(adata.uns["AUCell signature names"]) == ["s0"]
+
+    # Adding signatures to a file which already contains AUCell values.
+    out2 = tmp_path / "out2.h5ad"
+    _run("signature_enrichment", "-a", out1, "-n", "s1", "-s", bed_files[1], "-o", out2)
+    adata = anndata.read_h5ad(out2)
+    assert adata.obsm["AUCell"].shape == (adata.n_obs, 2)
+    assert list(adata.uns["AUCell signature names"]) == ["s0", "s1"]
+    assert "X_topic" in adata.obsm
+
+
+def test_dars(adata_file, tmp_path):
+    hv_bed = tmp_path / "hv_regions.bed"
+    _run("dars", "compute_hv_regions", "-a", adata_file, "--output-bed", hv_bed)
+    hv_regions = hv_bed.read_text().splitlines()
+    assert len(hv_regions) > 0
+
+    # Cell annotations are taken from .obs of the AnnData file.
+    output_dir = tmp_path / "dars"
+    _run(
+        "dars",
+        "compute_dars",
+        "-a",
+        adata_file,
+        "--hv-regions-bed",
+        hv_bed,
+        "--output-dir",
+        output_dir,
+    )
+    assert sorted(p.name for p in output_dir.iterdir()) == [
+        "DARs_fg_high_vs_bg_others.bed",
+        "DARs_fg_low_vs_bg_others.bed",
+    ]
+    dars_high = (output_dir / "DARs_fg_high_vs_bg_others.bed").read_text().splitlines()
+    assert len(dars_high) > 0
+
+
+def test_dars_missing_annotation_column(adata_file, tmp_path):
+    result = subprocess.run(
+        [
+            *CLI,
+            "dars",
+            "compute_dars",
+            "-a",
+            str(adata_file),
+            "--annotation-column",
+            "missing",
+            "--output-dir",
+            str(tmp_path / "dars"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert 'Column "missing" not found' in result.stderr
+
+
+@pytest.mark.parametrize("target", ["cell", "region"])
+def test_binarize(adata_file, tmp_path, topic_model, target):
+    from pycisTopic.topic_binarization import binarize_topics
+
+    region_topic, cell_topic, region_names, cell_names = topic_model
+    out_dir = tmp_path / "binarized"
+    _run(
+        "topic_modeling", "mallet", "binarize",
+        "-a", target, "-m", "ntop", "-n", 10, "-i", adata_file, "-p", out_dir,
+    )
+    prob, names = (
+        (cell_topic.T, cell_names) if target == "cell" else (region_topic, region_names)
+    )
+    expected, _, _ = binarize_topics(prob, names, method="ntop", ntop=10)
+    n_topics = prob.shape[1]
+    assert len((out_dir / f"{target}_thresholds.tsv").read_text().splitlines()) == n_topics
+    for topic_idx, expected_names in enumerate(expected):
+        suffix = "txt" if target == "cell" else "bed"
+        lines = (
+            (out_dir / f"{target}_Topic_{topic_idx + 1}_binarized.{suffix}")
+            .read_text()
+            .splitlines()
+        )
+        if target == "cell":
+            names_in_file = [line.split("\t")[0] for line in lines]
+        else:
+            names_in_file = [
+                "{}:{}-{}".format(*line.split("\t")[:3]) for line in lines
+            ]
+        assert names_in_file == expected_names

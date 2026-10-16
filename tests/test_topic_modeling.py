@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import math
+import subprocess
+import sys
 
 import anndata
 import numpy as np
@@ -67,10 +69,7 @@ def test_filenames():
     assert filenames.parameters_json_filename == "out/sample.10_topics.parameters.json"
     assert filenames.model_filename_prefix == "out/sample.10_topics.model"
     assert filenames.model_stats_filename == "out/sample.10_topics.stats.json"
-    assert (
-        filenames.anndata_cell_topic_filename
-        == "out/sample.10_topics_cell_topic_adata.h5ad"
-    )
+    assert filenames.anndata_filename == "out/sample.10_topics.h5ad"
 
 
 class TestMalletOutputConversion:
@@ -174,18 +173,87 @@ def test_calculate_model_evaluation_stats_topic_mismatch(mallet_output, rng):
         )
 
 
-def test_create_anndata_from_mallet(mallet_output):
-    filenames, cell_topic, region_topic_counts = mallet_output
-    cell_barcodes = [f"cell{i}" for i in range(N_CELLS)]
-    region_ids = [f"chr1:{i * 100}-{i * 100 + 50}" for i in range(N_REGIONS)]
-    create_anndata_from_mallet(filenames.output_prefix, N_TOPICS, cell_barcodes, region_ids)
-    cell_adata = anndata.read_h5ad(filenames.anndata_cell_topic_filename)
-    region_adata = anndata.read_h5ad(filenames.anndata_region_topic_filename)
-    assert list(cell_adata.obs_names) == cell_barcodes
-    assert list(cell_adata.var_names) == [f"Topic{i}" for i in range(1, N_TOPICS + 1)]
-    np.testing.assert_allclose(cell_adata.X, cell_topic, atol=1e-6)
-    assert list(region_adata.obs_names) == region_ids
-    np.testing.assert_allclose(
-        region_adata.X, (region_topic_counts / region_topic_counts.sum(axis=1)[:, None]).T,
-        rtol=1e-6,
+def _write_matrix_files(prefix, rng):
+    import scipy.io
+
+    matrix = scipy.sparse.random(
+        N_REGIONS, N_CELLS, density=0.3, format="csr", random_state=0
     )
+    matrix.data[:] = 1
+    scipy.io.mmwrite(f"{prefix}.matrix.mtx", matrix)
+    cell_barcodes = [f"cell{i}___s1" for i in range(N_CELLS)]
+    region_ids = [f"chr1:{i * 100}-{i * 100 + 50}" for i in range(N_REGIONS)]
+    with open(f"{prefix}.cell_barcodes.tsv", "w") as fh:
+        fh.write("\n".join(cell_barcodes) + "\n")
+    with open(f"{prefix}.region_ids.tsv", "w") as fh:
+        fh.write("\n".join(region_ids) + "\n")
+    return matrix, cell_barcodes, region_ids
+
+
+@pytest.mark.parametrize("with_stats", [True, False])
+def test_create_anndata_from_mallet(mallet_output, rng, with_stats, tmp_path):
+    filenames, cell_topic, region_topic_counts = mallet_output
+    matrix, cell_barcodes, region_ids = _write_matrix_files(tmp_path / "matrix", rng)
+    if with_stats:
+        calculate_model_evaluation_stats(matrix, filenames.output_prefix, N_TOPICS)
+    adata = create_anndata_from_mallet(
+        filenames.output_prefix, N_TOPICS, cell_barcodes, region_ids, matrix
+    )
+    written = anndata.read_h5ad(filenames.anndata_filename)
+    for result in (adata, written):
+        assert result.shape == (N_CELLS, N_REGIONS)
+        assert list(result.obs_names) == cell_barcodes
+        assert list(result.var_names) == region_ids
+        np.testing.assert_allclose(result.obsm["X_topic"], cell_topic, atol=1e-6)
+        np.testing.assert_allclose(
+            result.varm["topic"],
+            (region_topic_counts / region_topic_counts.sum(axis=1)[:, None]).T,
+            rtol=1e-6,
+        )
+        np.testing.assert_array_equal(result.X.toarray(), matrix.T.toarray())
+        model = result.uns["pycistopic"]["model"]
+        assert model["n_topics"] == N_TOPICS
+        assert model["alpha"] == 50
+        topics = result.uns["pycistopic"]["topics"]
+        assert list(topics.index) == [f"Topic{i}" for i in range(1, N_TOPICS + 1)]
+        if with_stats:
+            assert set(model["metrics"]) == {
+                "Arun_2010",
+                "Cao_Juan_2009",
+                "Mimno_2011",
+                "loglikelihood",
+            }
+            assert list(topics.columns) == [
+                "Assignments",
+                "Coherence",
+                "Marginal_topic_dist",
+            ]
+            np.testing.assert_array_equal(
+                topics["Assignments"], region_topic_counts.sum(axis=1)
+            )
+        else:
+            assert "metrics" not in model
+            assert topics.shape[1] == 0
+
+
+CLI = [sys.executable, "-m", "pycisTopic.cli.pycistopic", "topic_modeling", "mallet"]
+
+
+def test_cli_create_anndata(mallet_output, rng, tmp_path):
+    filenames, _, _ = mallet_output
+    matrix, cell_barcodes, _ = _write_matrix_files(tmp_path / "matrix", rng)
+    mtx = str(tmp_path / "matrix.matrix.mtx")
+    base = [*CLI, "create_anndata", "-o", filenames.output_prefix, "-t", str(N_TOPICS)]
+
+    subprocess.run([*base, "-i", mtx], check=True, capture_output=True)
+    adata = anndata.read_h5ad(filenames.anndata_filename)
+    assert adata.X is None
+    assert list(adata.obs_names) == cell_barcodes
+
+    subprocess.run([*base, "-i", mtx, "--store_matrix"], check=True, capture_output=True)
+    adata = anndata.read_h5ad(filenames.anndata_filename)
+    np.testing.assert_array_equal(adata.X.toarray(), matrix.T.toarray())
+
+    result = subprocess.run(base, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "Provide the binary accessibility matrix" in result.stderr

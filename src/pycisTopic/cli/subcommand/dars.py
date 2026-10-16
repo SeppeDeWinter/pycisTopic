@@ -163,7 +163,7 @@ def filter_hv_regions_for_contrast(
 
 
 def get_contrast_barcodes_lists(
-    cell_data_tsv: str | Path | os.PathLike,
+    cell_data_tsv: str | Path | os.PathLike | pl.DataFrame,
     barcode_column: str,
     annotation_column: str,
     contrasts_tsv: str | Path | os.PathLike | None = None,
@@ -174,7 +174,8 @@ def get_contrast_barcodes_lists(
     Parameters
     ----------
     cell_data_tsv:
-        Path to TSV file with cell annotations.
+        Path to TSV file with cell annotations or Polars DataFrame with cell
+        annotations.
     barcode_column:
         Column name containing cell barcodes.
     annotation_column:
@@ -193,7 +194,11 @@ def get_contrast_barcodes_lists(
     """
 
     # Read cell data
-    df = pl.read_csv(cell_data_tsv, separator="\t")
+    df = (
+        cell_data_tsv
+        if isinstance(cell_data_tsv, pl.DataFrame)
+        else pl.read_csv(cell_data_tsv, separator="\t")
+    )
 
     # Initialize contrast barcodes dictionary
     contrast_barcodes: dict[str, dict[str, list[str]]] = {}
@@ -259,15 +264,15 @@ def run_compute_dars(args):
     import anndata as ad
     import numpy as np
 
+    from pycisTopic.adata import get_cell_topic, get_region_topic
     from pycisTopic.diff_features import (
         calculate_per_region_mean_and_dispersion_on_normalized_imputed_acc,
         find_highly_variable_regions,
         get_marker_regions_for_contrast,
     )
 
-    region_topic_h5ad: str = args.region_topic_h5ad
-    cell_topic_h5ad: str = args.cell_topic_h5ad
-    cell_data_tsv: str = args.cell_data
+    adata_h5ad: str = args.adata
+    cell_data_tsv: str | None = args.cell_data
     barcode_column: str = args.barcode_column
     annotation_column: str = args.annotation_column
     contrasts_tsv: str | None = args.contrasts_tsv
@@ -299,12 +304,28 @@ def run_compute_dars(args):
 
     print("Loading region-topic and cell-topic distributions...")
 
-    region_topic_adata = ad.read_h5ad(region_topic_h5ad)
-    cell_topic_adata = ad.read_h5ad(cell_topic_h5ad)
-    region_topic = region_topic_adata.X.astype(np.float32)
-    cell_topic = cell_topic_adata.X.astype(np.float32).T
-    cell_names = cell_topic_adata.obs_names.tolist()
-    all_region_names = region_topic_adata.obs_names.tolist()
+    adata = ad.read_h5ad(adata_h5ad, backed="r")
+    region_topic = get_region_topic(adata)
+    cell_topic = get_cell_topic(adata)
+    cell_names = adata.obs_names.tolist()
+    all_region_names = adata.var_names.tolist()
+
+    if cell_data_tsv is None:
+        # Use cell annotations stored in the AnnData object.
+        if annotation_column not in adata.obs.columns:
+            raise ValueError(
+                f'Column "{annotation_column}" not found in .obs of "{adata_h5ad}". '
+                "Add it to the AnnData object or provide --cell-data."
+            )
+        barcode_column = "cell_barcode"
+        cell_data = pl.DataFrame(
+            {
+                barcode_column: cell_names,
+                annotation_column: adata.obs[annotation_column].astype(str).tolist(),
+            }
+        )
+    else:
+        cell_data = pl.read_csv(cell_data_tsv, separator="\t")
 
     if hv_regions_bed is not None:
         # Path A: user provided precomputed highly variable regions -> skip HV computation.
@@ -381,7 +402,7 @@ def run_compute_dars(args):
 
     print("Preparing contrast cell barcode lists...")
     contrast_barcodes = get_contrast_barcodes_lists(
-        cell_data_tsv=cell_data_tsv,
+        cell_data_tsv=cell_data,
         barcode_column=barcode_column,
         annotation_column=annotation_column,
         contrasts_tsv=contrasts_tsv,
@@ -473,6 +494,7 @@ def run_compute_hv_regions(args):
     import anndata as ad
     import numpy as np
 
+    from pycisTopic.adata import get_cell_topic, get_region_topic
     from pycisTopic.diff_features import (
         calculate_per_region_mean_and_dispersion_on_normalized_imputed_acc,
         find_highly_variable_regions,
@@ -483,14 +505,10 @@ def run_compute_hv_regions(args):
 
     print("Loading region-topic and cell-topic distributions...")
 
-    region_topic_h5ad: str = args.region_topic_h5ad
-    cell_topic_h5ad: str = args.cell_topic_h5ad
-
-    region_topic_adata = ad.read_h5ad(region_topic_h5ad)
-    cell_topic_adata = ad.read_h5ad(cell_topic_h5ad)
-    region_topic = region_topic_adata.X.astype(np.float32)
-    cell_topic = cell_topic_adata.X.astype(np.float32).T
-    region_names = region_topic_adata.obs_names.tolist()
+    adata = ad.read_h5ad(args.adata, backed="r")
+    region_topic = get_region_topic(adata)
+    cell_topic = get_cell_topic(adata)
+    region_names = adata.var_names.tolist()
 
     print("Calculating per-region mean and dispersion on normalized imputed accessibility...")
     print("region_topic shape:", region_topic.shape)
@@ -576,14 +594,11 @@ def add_parser_dars(subparsers: _SubParsersAction[ArgumentParser]):
     parser_dars_compute_dars.set_defaults(func=run_compute_dars)
 
     parser_dars_compute_dars.add_argument(
-        "--region-topic-h5ad",
+        "-a",
+        "--adata",
         required=True,
-        help="Path to region-topic distribution H5AD file. Output of topic modeling.",
-    )
-    parser_dars_compute_dars.add_argument(
-        "--cell-topic-h5ad",
-        required=True,
-        help="Path to cell-topic distribution H5AD file. Output of topic modeling.",
+        help="Path to pycisTopic AnnData (.h5ad) file with the topic model. Output of "
+        "`pycistopic topic_modeling mallet create_anndata`.",
     )
 
     # Region filtering options (mutually informative)
@@ -615,8 +630,10 @@ def add_parser_dars(subparsers: _SubParsersAction[ArgumentParser]):
     # Cell annotation / contrast options
     parser_dars_compute_dars.add_argument(
         "--cell-data",
-        required=True,
-        help="Path to TSV file with cell annotations (must include barcode and annotation columns).",
+        default=None,
+        help="Path to TSV file with cell annotations (must include barcode and "
+        "annotation columns). If omitted, --annotation-column is read from .obs of "
+        "the AnnData file.",
     )
     parser_dars_compute_dars.add_argument(
         "--barcode-column",
@@ -683,14 +700,11 @@ def add_parser_dars(subparsers: _SubParsersAction[ArgumentParser]):
     parser_dars_compute_hv_regions.set_defaults(func=run_compute_hv_regions)
 
     parser_dars_compute_hv_regions.add_argument(
-        "--region-topic-h5ad",
+        "-a",
+        "--adata",
         required=True,
-        help="Path to region-topic distribution H5AD file. Output of topic modeling.",
-    )
-    parser_dars_compute_hv_regions.add_argument(
-        "--cell-topic-h5ad",
-        required=True,
-        help="Path to cell-topic distribution H5AD file. Output of topic modeling.",
+        help="Path to pycisTopic AnnData (.h5ad) file with the topic model. Output of "
+        "`pycistopic topic_modeling mallet create_anndata`.",
     )
     parser_dars_compute_hv_regions.add_argument(
         "--output-bed",

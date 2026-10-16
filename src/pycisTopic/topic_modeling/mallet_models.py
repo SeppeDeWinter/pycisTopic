@@ -933,9 +933,5 @@ class LDAMalletFilenames:
         return f"{self.output_prefix}.{self.n_topics}_topics.stats.json"
 
     @property
-    def anndata_cell_topic_filename(self):
-        return f"{self.output_prefix}.{self.n_topics}_topics_cell_topic_adata.h5ad"
-
-    @property
-    def anndata_region_topic_filename(self):
-        return f"{self.output_prefix}.{self.n_topics}_topics_region_topic_adata.h5ad"
+    def anndata_filename(self):
+        return f"{self.output_prefix}.{self.n_topics}_topics.h5ad"

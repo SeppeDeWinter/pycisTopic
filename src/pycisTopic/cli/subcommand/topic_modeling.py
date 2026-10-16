@@ -197,70 +197,32 @@ def run_mallet_plot_model_evaluation_stats(args):
 
 def binarize_cell_or_region_topic(args):
     """Binarize cell-topics or region-topics."""
+    import os
+
+    import anndata
+
+    from pycisTopic.adata import get_cell_topic, get_region_topic
+    from pycisTopic.topic_binarization import binarize_topics
+
     target = args.target
     method = args.method
     ntop = args.ntop
     smooth_topics = args.smooth_topics
     nbins = args.nbins
-    cell_barcodes_filename = args.cell_barcodes_filename
-    region_ids_filename = args.regions_bed_filename
-    output_prefix = args.output_prefix
-    n_topics = args.n_topics
     out_dir = args.out_dir
-
-    # input validation
-    if target == "cell" and cell_barcodes_filename is None:
-        raise ValueError(
-            "`cell_barcodes_filename` using `--cb` should be provided when target is `cell`"
-        )
-    if target == "region" and region_ids_filename is None:
-        raise ValueError(
-            "`regions_bed_filename` using `--regions` should be provided when target is `region`"
-        )
-
-    import os
 
     if not os.path.exists(out_dir):
         print(f"Making directory: {out_dir}")
         os.makedirs(out_dir)
 
-    from pycisTopic.fragments import read_barcodes_file_to_polars_series
-    from pycisTopic.topic_binarization import binarize_topics
-    from pycisTopic.topic_modeling.mallet_models import LDAMallet, LDAMalletFilenames
-
-    lda_mallet_filenames = LDAMalletFilenames(
-        output_prefix=output_prefix, n_topics=n_topics
-    )
-
+    print(f'Read topic model from "{args.adata}".')
+    adata = anndata.read_h5ad(args.adata, backed="r")
     if target == "cell":
-        print(f'Read cell barcodes filename "{cell_barcodes_filename}".')
-        cell_or_region_names = read_barcodes_file_to_polars_series(
-            barcodes_tsv_filename=cell_barcodes_filename,
-            sample_id=None,
-            cb_end_to_remove=None,
-            cb_sample_separator=None,
-        ).to_list()
-        print(
-            f'Read cell-topic probabilities filename "{lda_mallet_filenames.cell_topic_probabilities_parquet_filename}".'
-        )
-        cell_or_region_topic_prob = LDAMallet.read_cell_topic_probabilities_parquet_file(
-            mallet_cell_topic_probabilities_parquet_filename=lda_mallet_filenames.cell_topic_probabilities_parquet_filename
-        )
-
-    if target == "region":
-        print(f'Read region IDs filename "{region_ids_filename}".')
-        cell_or_region_names = read_barcodes_file_to_polars_series(
-            barcodes_tsv_filename=region_ids_filename,
-            sample_id=None,
-            cb_end_to_remove=None,
-            cb_sample_separator=None,
-        ).to_list()
-        print(
-            f'Read region-topic probabilities filename "{lda_mallet_filenames.region_topic_counts_parquet_filename}".'
-        )
-        cell_or_region_topic_prob = LDAMallet.read_region_topic_counts_parquet_file_to_region_topic_probabilities(
-            mallet_region_topic_counts_parquet_filename=lda_mallet_filenames.region_topic_counts_parquet_filename
-        ).T
+        cell_or_region_names = adata.obs_names.tolist()
+        cell_or_region_topic_prob = get_cell_topic(adata).T
+    else:
+        cell_or_region_names = adata.var_names.tolist()
+        cell_or_region_topic_prob = get_region_topic(adata)
 
     print("Binarizing topics ...")
     cell_or_region_names_per_topic, scores_per_topic, thresholds = binarize_topics(
@@ -303,21 +265,39 @@ def binarize_cell_or_region_topic(args):
 def run_create_anndata_from_mallet(args):
     from pycisTopic.topic_modeling.create_anndata import create_anndata_from_mallet
 
-    cell_barcodes: list[str] = []
-    with open(args.cell_barcodes) as f:
-        for line in f:
-            cell_barcodes.append(line.strip())
+    def read_lines(filename: str) -> list[str]:
+        with open(filename) as fh:
+            return [line.strip() for line in fh if line.strip()]
 
-    region_ids: list[str] = []
-    with open(args.region_ids) as f:
-        for line in f:
-            region_ids.append(line.strip())
+    matrix_prefix = None
+    if args.binary_matrix is not None:
+        check_accessibility_matrix_files(args.binary_matrix)
+        matrix_prefix = args.binary_matrix[: -len(".matrix.mtx")]
+    elif args.cell_barcodes is None or args.region_ids is None:
+        raise ArgumentTypeError(
+            "Provide the binary accessibility matrix (-i) or both cell barcodes (-c) "
+            "and region IDs (-r)."
+        )
+    if args.store_matrix and args.binary_matrix is None:
+        raise ArgumentTypeError("--store_matrix requires the binary matrix (-i).")
+
+    cell_barcodes = read_lines(
+        args.cell_barcodes or f"{matrix_prefix}.cell_barcodes.tsv"
+    )
+    region_ids = read_lines(args.region_ids or f"{matrix_prefix}.region_ids.tsv")
+
+    binary_matrix = None
+    if args.store_matrix:
+        import scipy.io
+
+        binary_matrix = scipy.io.mmread(args.binary_matrix)
 
     create_anndata_from_mallet(
         output_prefix=args.output_prefix,
         n_topics=args.n_topics,
         cell_barcodes=cell_barcodes,
         region_ids=region_ids,
+        binary_matrix=binary_matrix,
     )
 
 
@@ -805,39 +785,14 @@ def add_parser_topic_modeling(subparsers: _SubParsersAction[ArgumentParser]):
         help="Number of bins to use in the histogram used for `otsu`, `yen` and `li` thresholding.",
     )
     parser_topic_modeling_mallet_binarize.add_argument(
-        "-c",
-        "--cb",
-        dest="cell_barcodes_filename",
-        action="store",
-        type=str,
-        required=False,
-        help="Filename with cell barcodes.",
-    )
-    parser_topic_modeling_mallet_binarize.add_argument(
-        "-r",
-        "--regions",
-        dest="regions_bed_filename",
-        action="store",
-        type=str,
-        required=False,
-        help="Filename with region IDs.",
-    )
-    parser_topic_modeling_mallet_binarize.add_argument(
-        "-o",
-        "--output",
-        dest="output_prefix",
+        "-i",
+        "--adata",
+        dest="adata",
         action="store",
         type=str,
         required=True,
-        help="Topic model output prefix.",
-    )
-    parser_topic_modeling_mallet_binarize.add_argument(
-        "-t",
-        "--n_topics",
-        dest="n_topics",
-        type=int,
-        required=True,
-        help="Model with `topic` number of topics to binarize.",
+        help="pycisTopic AnnData (.h5ad) file with the topic model (output of "
+        "`create_anndata` or `pycistopic convert`).",
     )
     parser_topic_modeling_mallet_binarize.add_argument(
         "-p",
@@ -852,12 +807,27 @@ def add_parser_topic_modeling(subparsers: _SubParsersAction[ArgumentParser]):
     parser_topic_modeling_mallet_anndata = subparser_topic_modeling_mallet.add_parser(
         "create_anndata",
         help="Generate AnnData h5ad file from Mallet result.",
-        description="Generate AnnData h5ad file from Mallet result.",
+        description="Generate a pycisTopic AnnData h5ad file "
+        "(OUTPUT_PREFIX.N_TOPICS_topics.h5ad, cells x regions) from Mallet result, "
+        "with cell-topic probabilities in .obsm['X_topic'], region-topic "
+        "probabilities in .varm['topic'] and model parameters and statistics (if "
+        "`mallet stats` was run) in .uns['pycistopic'].",
     )
     parser_topic_modeling_mallet_anndata.set_defaults(
         func=run_create_anndata_from_mallet
     )
 
+    parser_topic_modeling_mallet_anndata.add_argument(
+        "-i",
+        "--input",
+        dest="binary_matrix",
+        action="store",
+        type=str,
+        required=False,
+        help="Binary accessibility matrix (PREFIX.matrix.mtx) used for topic modeling. "
+        "Cell barcodes and region IDs are read from PREFIX.cell_barcodes.tsv and "
+        "PREFIX.region_ids.tsv, unless -c and/or -r are given.",
+    )
     parser_topic_modeling_mallet_anndata.add_argument(
         "-c",
         "--cb",
@@ -865,7 +835,7 @@ def add_parser_topic_modeling(subparsers: _SubParsersAction[ArgumentParser]):
         action="store",
         type=str,
         required=False,
-        help="Filename with cell barcodes.",
+        help="Filename with cell barcodes (columns of the binary matrix).",
     )
     parser_topic_modeling_mallet_anndata.add_argument(
         "-r",
@@ -874,7 +844,14 @@ def add_parser_topic_modeling(subparsers: _SubParsersAction[ArgumentParser]):
         action="store",
         type=str,
         required=False,
-        help="Filename with region IDs.",
+        help="Filename with region IDs (rows of the binary matrix).",
+    )
+    parser_topic_modeling_mallet_anndata.add_argument(
+        "--store_matrix",
+        dest="store_matrix",
+        action="store_true",
+        help="Store the binary accessibility matrix (-i) in .X of the AnnData file. "
+        "Default: do not store it (smaller file).",
     )
     parser_topic_modeling_mallet_anndata.add_argument(
         "-o",
