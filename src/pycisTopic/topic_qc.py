@@ -1,38 +1,38 @@
 from __future__ import annotations
 
+import warnings
 from itertools import compress
 from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 
+from pycisTopic.adata import OBSM_TOPIC_KEY, get_topic_names, get_topics
+
 if TYPE_CHECKING:
-    from pycisTopic.cistopic_class import CistopicObject
+    import anndata
 
 
-def compute_topic_metrics(
-    cistopic_obj: CistopicObject,
-    return_metrics: bool = True,
-):
+def compute_topic_metrics(adata: anndata.AnnData) -> pd.DataFrame:
     """
     Compute topic quality control metrics.
 
     Parameters
     ----------
-    cistopic_obj
-        A cisTopic object with a model in `class::CistopicObject.selected_model`.
-    return_metrics
-        Whether to return metrics as `class::pd.DataFrame`. The metrics will be also
-        appended to `class::CistopicObject.selected_model.topic_qc_metrics` despite
-        the value of this parameter. Default: True.
+    adata
+        pycisTopic AnnData object (see :mod:`pycisTopic.adata`). The number of
+        assignments, coherence and marginal topic distribution per topic are taken
+        from ``uns["pycistopic"]["topics"]``, which is filled by
+        ``pycistopic topic_modeling mallet create_anndata`` when the model statistics
+        (``pycistopic topic_modeling mallet stats``) were calculated first.
 
     Returns
     -------
-    Data frame containing a column with topic metrics: the number of assignments, the
+    Data frame (topics x metrics) with the number of assignments (and its log10), the
     topic coherence (Mimno et al., 2011), the marginal topic distribution (which
-    indicates how much each topic contributes to the model), and the gini index (which
-    indicates the specificity of topics. If topics have been binarized, the number of
-    regions/cells per topic will be added.
+    indicates how much each topic contributes to the model) and the Gini index of the
+    cell-topic distribution (which indicates the specificity of topics).
+    The metrics are also stored in ``uns["pycistopic"]["topics"]``.
 
     References
     ----------
@@ -42,37 +42,26 @@ def compute_topic_metrics(
     Processing (pp. 262-272).
 
     """
-    model = cistopic_obj.selected_model
-    topic_coh = model.coherence["Mimno_2011"]
-    topic_ass = model.topic_ass.drop("Topic", axis=1)
-    marginal_dist = model.marg_topic["Marg_Topic"]
-    gini_values = pd.DataFrame(
-        [
-            gini_coefficient(model.cell_topic.iloc[i].to_numpy())
-            for i in range(model.cell_topic.shape[0])
-        ]
-    )
-    topic_qc_metrics = pd.concat(
-        [
-            np.log10(topic_ass["Assignments"]),
-            topic_ass,
-            topic_coh,
-            marginal_dist,
-            gini_values,
-        ],
-        axis=1,
-    )
-    topic_qc_metrics.columns = (
-        ["Log10_Assignments"]
-        + topic_ass.columns.tolist()
-        + ["Coherence", "Marginal_topic_dist", "Gini_index"]
-    )
-    topic_qc_metrics.index = [
-        "Topic" + str(i) for i in range(1, model.cell_topic.shape[0] + 1)
+    topics = get_topics(adata)
+    missing = [
+        column
+        for column in ("Assignments", "Coherence", "Marginal_topic_dist")
+        if column not in topics.columns
     ]
-    cistopic_obj.selected_model.topic_qc_metrics = topic_qc_metrics
-    if return_metrics is True:
-        return topic_qc_metrics
+    if missing:
+        warnings.warn(
+            f"Topic statistics {missing} are not available. Run `pycistopic "
+            "topic_modeling mallet stats` before `create_anndata` to include them.",
+            stacklevel=2,
+        )
+    if "Assignments" in topics.columns:
+        topics["Log10_Assignments"] = np.log10(topics["Assignments"])
+    cell_topic = np.asarray(adata.obsm[OBSM_TOPIC_KEY])
+    topics["Gini_index"] = [
+        gini_coefficient(cell_topic[:, topic_idx])
+        for topic_idx in range(cell_topic.shape[1])
+    ]
+    return topics.copy()
 
 
 def plot_topic_qc(
@@ -227,88 +216,94 @@ def plot_topic_qc(
 
 
 def topic_annotation(
-    cistopic_obj: CistopicObject,
+    adata: anndata.AnnData,
     annot_var: str,
-    binarized_cell_topic: dict[str, pd.DataFrame] | None = None,
+    binarized_cell_topic: dict[str, list[str]] | None = None,
     general_topic_thr: float = 0.2,
     **kwargs,
-):
+) -> pd.DataFrame:
     """
     Automatic annotation of topics.
 
+    For each group of cells (``adata.obs[annot_var]``), the fraction of cells of the
+    group in a binarized topic is compared to the fraction of all cells in that topic
+    (one-sided proportion z-test, p < 0.05).
+
     Parameters
     ----------
-    cistopic_obj
-        A cisTopic object with a model in `class::CistopicObject.selected_model`.
+    adata
+        pycisTopic AnnData object (see :mod:`pycisTopic.adata`).
     annot_var
-        Name of the variable (contained in 'class::CistopicObject.cell_data') to use
-        for annotation.
+        Name of the column in ``adata.obs`` to use for annotation.
     binarized_cell_topic
-        A dictionary containing binarized cell topic distributions (from
-        `binarize_topics()`). If not provided, `binarized_topics()` will be run.
-        Default: None.
+        Dictionary with topic names as keys and the cell barcodes in the binarized
+        topic as values. If not provided, the cell-topic distributions are binarized
+        with :func:`pycisTopic.topic_binarization.binarize_topics`.
     general_topic_thr
         Threshold for considering a topic as general. After assigning topics to
         annotations, the ratio of cells in the binarized topic in the whole
         population is compared with the ratio of the total number of cells in the
         assigned groups versus the whole population.
         If the difference is above this threshold, the topic is considered general.
-        Default: 0.2.
     **kwargs
-        Arguments to pass to `binarize_topics()`
+        Arguments to pass to :func:`pycisTopic.topic_binarization.binarize_topics`.
 
     Returns
     -------
-        Data frame containing a column with the annotations (separated by `,`),
-        the ratio of cells in the binarized topic and the ratio of cells assigned
-        to a topic based on the annotated groups.
+    Data frame (topics x annotation) containing a column with the annotations
+    (separated by ``", "``), the ratio of cells in the binarized topic, the ratio of
+    cells assigned to a topic based on the annotated groups and whether the topic is
+    general. The columns are also stored in ``uns["pycistopic"]["topics"]``.
 
     """
-    model = cistopic_obj.selected_model
-    cell_topic = model.cell_topic
-    annot = cistopic_obj.cell_data[annot_var]
+    names = get_topic_names(adata)
+    cell_names = adata.obs_names.tolist()
+    n_cells = len(cell_names)
     if binarized_cell_topic is None:
         from pycisTopic.topic_binarization import binarize_topics
 
-        binarized_cell_topic = binarize_topics(cistopic_obj, target="cell", **kwargs)
+        binarized_cells_per_topic, _, _ = binarize_topics(
+            np.asarray(adata.obsm[OBSM_TOPIC_KEY]), cell_names, **kwargs
+        )
+        binarized_cell_topic = dict(zip(names, binarized_cells_per_topic))
 
-    topic_annot_dict = {topic: [] for topic in cell_topic.index.tolist()}
-    group_size_dict = {topic: [] for topic in cell_topic.index.tolist()}
-    for group in set(filter(lambda x: x == x, set(annot))):
-        cells_in_group = annot[annot == group].index.tolist()
-        nobs = len(cells_in_group)
-        for topic in cell_topic.index.tolist():
-            count = len(
-                list(
-                    set(cells_in_group)
-                    & set(binarized_cell_topic[topic].index.tolist())
-                )
-            )
-            value = binarized_cell_topic[topic].shape[0] / cell_topic.shape[1]
-            pval = _proportion_ztest_larger(count, nobs, value)
-            if pval < 0.05:
-                topic_annot_dict[topic].append(group)
-                group_size_dict[topic].append(nobs)
+    annot = adata.obs[annot_var]
+    groups = sorted(annot.dropna().astype(str).unique())
+    group_cells = {
+        group: set(annot.index[annot.astype(str) == group]) for group in groups
+    }
+    binarized_cells = {topic: set(binarized_cell_topic[topic]) for topic in names}
 
-    topic_annot_dict = {x: ", ".join(topic_annot_dict[x]) for x in topic_annot_dict}
+    annotations, ratio_cells_in_topic, ratio_group_in_population = [], [], []
+    for topic in names:
+        value = len(binarized_cells[topic]) / n_cells
+        assigned_groups = []
+        assigned_group_size = 0
+        for group in groups:
+            count = len(group_cells[group] & binarized_cells[topic])
+            nobs = len(group_cells[group])
+            if _proportion_ztest_larger(count, nobs, value) < 0.05:
+                assigned_groups.append(group)
+                assigned_group_size += nobs
+        annotations.append(", ".join(assigned_groups))
+        ratio_cells_in_topic.append(value)
+        ratio_group_in_population.append(assigned_group_size / n_cells)
+
     topic_annot = pd.DataFrame(
-        [
-            list(topic_annot_dict.values()),
-            [
-                binarized_cell_topic[topic].shape[0] / cell_topic.shape[1]
-                for topic in cell_topic.index.tolist()
-            ],
-            [
-                sum(group_size_dict[topic]) / cell_topic.shape[1]
-                for topic in cell_topic.index.tolist()
-            ],
-        ],
-        index=[annot_var, "Ratio_cells_in_topic", "Ratio_group_in_population"],
-    ).T
-    topic_annot.index = list(topic_annot_dict.keys())
+        {
+            annot_var: annotations,
+            "Ratio_cells_in_topic": ratio_cells_in_topic,
+            "Ratio_group_in_population": ratio_group_in_population,
+        },
+        index=names,
+    )
     topic_annot["is_general"] = (
         topic_annot["Ratio_cells_in_topic"] - topic_annot["Ratio_group_in_population"]
     ) > general_topic_thr
+
+    topics = get_topics(adata)
+    for column in topic_annot.columns:
+        topics[column] = topic_annot[column]
     return topic_annot
 
 
