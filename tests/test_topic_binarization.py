@@ -4,8 +4,10 @@ import numpy as np
 import pytest
 
 from pycisTopic.topic_binarization import (
+    _gaussian_mixture_1d_means,
     binarize_topics,
     smooth_topics_distributions,
+    threshold_aucell,
     threshold_li,
     threshold_ntop,
     threshold_otsu,
@@ -77,7 +79,7 @@ class TestBinarizeTopics:
         names = [f"region{i}" for i in range(200)]
         return prob, names
 
-    @pytest.mark.parametrize("method", ["otsu", "yen", "li"])
+    @pytest.mark.parametrize("method", ["otsu", "yen", "li", "aucell"])
     def test_output_structure(self, topic_prob, method):
         prob, names = topic_prob
         selected, scores, thresholds = binarize_topics(prob, names, method=method)
@@ -107,5 +109,34 @@ class TestBinarizeTopics:
             binarize_topics(prob, names, method="ntop")
         with pytest.raises(ValueError, match="method"):
             binarize_topics(prob, names, method="median")
-        with pytest.raises(NotImplementedError):
-            binarize_topics(prob, names, method="aucell")
+
+
+class TestThresholdAucell:
+    def test_unimodal_is_mean_plus_two_std(self, rng):
+        values = rng.normal(0.3, 0.05, 2000)
+        assert threshold_aucell(values) == pytest.approx(
+            values.mean() + 2 * values.std()
+        )
+
+    # With a small high mode (e.g. 5%), the density between the modes is flat with
+    # several local minima and the bounded Brent search (as in pySCENIC) does not
+    # always end in a minimum, so only clear troughs are tested here.
+    @pytest.mark.parametrize("fraction", [0.2, 0.5])
+    def test_bimodal_is_density_minimum_between_modes(self, rng, fraction):
+        from scipy.stats import gaussian_kde
+
+        n_high = int(2000 * fraction)
+        values = np.concatenate(
+            [rng.normal(0.2, 0.06, 2000 - n_high), rng.normal(0.7, 0.08, n_high)]
+        )
+        threshold = threshold_aucell(values)
+        assert 0.3 < threshold < 0.6
+        # The threshold is a (local) minimum of the kernel density between both modes.
+        kde = gaussian_kde(values)
+        assert kde(threshold)[0] <= kde(threshold - 0.005)[0]
+        assert kde(threshold)[0] <= kde(threshold + 0.005)[0]
+
+    def test_gaussian_mixture_means(self, rng):
+        values = np.concatenate([rng.normal(-2, 0.5, 700), rng.normal(3, 1, 300)])
+        means = np.sort(_gaussian_mixture_1d_means(values))
+        np.testing.assert_allclose(means, [-2, 3], atol=0.15)

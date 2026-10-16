@@ -138,3 +138,12 @@ def test_binarize(adata_file, tmp_path, topic_model, target):
                 "{}:{}-{}".format(*line.split("\t")[:3]) for line in lines
             ]
         assert names_in_file == expected_names
+
+
+def test_binarize_aucell(adata_file, tmp_path):
+    out_dir = tmp_path / "binarized"
+    _run(
+        "topic_modeling", "mallet", "binarize",
+        "-a", "cell", "-m", "aucell", "-i", adata_file, "-p", out_dir,
+    )
+    assert (out_dir / "cell_Topic_1_binarized.txt").read_text()

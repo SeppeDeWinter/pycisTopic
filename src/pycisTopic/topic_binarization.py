@@ -6,8 +6,6 @@ from typing import Callable, Literal
 import numpy as np
 import numpy.typing as npt
 
-#from pyscenic import binarization
-
 
 def smooth_topics_distributions(
     cell_or_region_topic_prob: npt.NDArray[np.float64],
@@ -193,11 +191,105 @@ def threshold_li(array: npt.NDArray[np.float64], nbins) -> float:
     return thr
 
 
-def threshold_aucell(array: npt.NDArray[np.float64]):
-    # TODO: implement this function to avoid pyscenic dependency
-    raise NotImplementedError("AUCell binarization is not implemented in this version of pycisTopic.")
-    #_, thr = binarization.binarize(pd.DataFrame(array))
-    #return float(thr)
+def _gaussian_mixture_1d_means(
+    x: npt.NDArray[np.float64],
+    max_iter: int = 100,
+    tol: float = 1e-3,
+    reg_covar: float = 1e-6,
+) -> npt.NDArray[np.float64]:
+    """
+    Fit a two component Gaussian mixture model on 1D data and return its means.
+
+    Deterministic version of ``sklearn.mixture.GaussianMixture(n_components=2)``:
+    initialized with 1D k-means (starting from the 25th and 75th percentile) and
+    fitted with the expectation-maximization algorithm.
+    """
+    # 1D k-means initialization.
+    means = np.percentile(x, [25.0, 75.0])
+    for _ in range(max_iter):
+        labels = np.abs(x[:, None] - means[None, :]).argmin(axis=1)
+        new_means = np.array(
+            [x[labels == k].mean() if np.any(labels == k) else means[k] for k in (0, 1)]
+        )
+        if np.allclose(new_means, means):
+            break
+        means = new_means
+    labels = np.abs(x[:, None] - means[None, :]).argmin(axis=1)
+    weights = np.array([np.mean(labels == k) for k in (0, 1)])
+    variances = np.array(
+        [x[labels == k].var() if np.any(labels == k) else x.var() for k in (0, 1)]
+    ) + reg_covar
+
+    lower_bound = -np.inf
+    for _ in range(max_iter):
+        # E-step: log responsibilities.
+        log_prob = (
+            -0.5 * np.log(2 * np.pi * variances)[None, :]
+            - 0.5 * (x[:, None] - means[None, :]) ** 2 / variances[None, :]
+            + np.log(np.maximum(weights, np.finfo(np.float64).tiny))[None, :]
+        )
+        log_norm = np.logaddexp(log_prob[:, 0], log_prob[:, 1])
+        responsibilities = np.exp(log_prob - log_norm[:, None])
+        # M-step.
+        nk = responsibilities.sum(axis=0) + 10 * np.finfo(np.float64).eps
+        weights = nk / x.shape[0]
+        means = (responsibilities * x[:, None]).sum(axis=0) / nk
+        variances = (
+            responsibilities * (x[:, None] - means[None, :]) ** 2
+        ).sum(axis=0) / nk + reg_covar
+        new_lower_bound = log_norm.mean()
+        if abs(new_lower_bound - lower_bound) < tol:
+            break
+        lower_bound = new_lower_bound
+    return means
+
+
+def threshold_aucell(array: npt.NDArray[np.float64]) -> float:
+    """
+    Apply AUCell threshold on topic distributions [Van de Sande et al., 2020].
+
+    Same approach as ``pyscenic.binarization.derive_threshold``: if Hartigan's dip
+    test does not reject unimodality (p > 0.05), the threshold is the mean plus two
+    standard deviations. Otherwise, the threshold is the minimum of the kernel
+    density estimate between the means of a two component Gaussian mixture model.
+    As in pySCENIC, this minimum is searched with a bounded Brent search, which can
+    end in a non-minimal point when the density between both modes is very flat.
+
+    Parameters
+    ----------
+    array
+        Array containing the cell or region values for the topic to be binarized.
+
+    Returns
+    -------
+    Binarization threshold.
+
+    Reference
+    ---------
+    Van de Sande, B., Flerin, C., Davie, K. et al., 2020. A scalable SCENIC workflow
+    for single-cell gene regulatory network analysis. Nature Protocols, 15,
+    pp.2247-2276.
+
+    """
+    from diptest import diptest
+    from scipy.optimize import minimize_scalar
+    from scipy.stats import gaussian_kde
+
+    data = np.asarray(array, dtype=np.float64).ravel()
+
+    _, pvalue = diptest(np.sort(data), sort_x=False, full_output=False, allow_zero=False)
+    if pvalue > 0.05:
+        # Unimodal distribution.
+        return float(data.mean() + 2.0 * data.std())
+
+    # Bimodal distribution: threshold at the "trough" between both peaks.
+    kde = gaussian_kde(data)
+    result = minimize_scalar(
+        lambda x: kde(x)[0],
+        bounds=tuple(np.sort(_gaussian_mixture_1d_means(data))),
+        method="bounded",
+    )
+    return float(result.x)
 
 
 def threshold_ntop(array: npt.NDArray[np.float64], ntop: int) -> float:
