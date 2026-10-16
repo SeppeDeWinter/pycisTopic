@@ -3,13 +3,8 @@ from __future__ import annotations
 from itertools import compress
 from typing import TYPE_CHECKING
 
-import matplotlib.cm as cm
-import matplotlib.patheffects as PathEffects
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from adjustText import adjust_text
-from statsmodels.stats import proportion
 
 if TYPE_CHECKING:
     from pycisTopic.cistopic_class import CistopicObject
@@ -140,6 +135,11 @@ def plot_topic_qc(
     A list with the selected topics.
 
     """
+    import matplotlib.cm as cm
+    import matplotlib.patheffects as PathEffects
+    import matplotlib.pyplot as plt
+    from adjustText import adjust_text
+
     # Plot xy.
     fig = plt.figure()
     if var_color is not None:
@@ -285,9 +285,7 @@ def topic_annotation(
                 )
             )
             value = binarized_cell_topic[topic].shape[0] / cell_topic.shape[1]
-            stat, pval = proportion.proportions_ztest(
-                count, nobs, value=value, alternative="larger"
-            )
+            pval = _proportion_ztest_larger(count, nobs, value)
             if pval < 0.05:
                 topic_annot_dict[topic].append(group)
                 group_size_dict[topic].append(nobs)
@@ -312,6 +310,21 @@ def topic_annotation(
         topic_annot["Ratio_cells_in_topic"] - topic_annot["Ratio_group_in_population"]
     ) > general_topic_thr
     return topic_annot
+
+
+def _proportion_ztest_larger(count: int, nobs: int, value: float) -> float:
+    """
+    One-sample z-test for a proportion with alternative "larger".
+
+    Same as ``statsmodels.stats.proportion.proportions_ztest(count, nobs, value=value,
+    alternative="larger")``: the variance is estimated from the observed proportion.
+    """
+    from scipy.stats import norm
+
+    prop = count / nobs
+    with np.errstate(divide="ignore", invalid="ignore"):
+        zstat = np.float64(prop - value) / np.sqrt(prop * (1 - prop) / nobs)
+    return float(norm.sf(zstat))
 
 
 def gini_coefficient(x):

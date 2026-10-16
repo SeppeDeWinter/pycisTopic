@@ -1,6 +1,6 @@
-import anndata as ad
-
 def convert_to_cell_topic_adata(cistopic_obj, keep_projections=True, save_path=None):
+    import anndata as ad
+
     # convert cell_topic matrix and annotations
     cell_topic = cistopic_obj.selected_model.cell_topic.T
     cell_obs = cistopic_obj.cell_data
@@ -19,6 +19,8 @@ def convert_to_cell_topic_adata(cistopic_obj, keep_projections=True, save_path=N
     return cell_topic_adata
 
 def convert_to_region_topic_adata(cistopic_obj, keep_projections=True, save_path=None):
+    import anndata as ad
+
     # convert cell_topic matrix and annotations
     region_topic = cistopic_obj.selected_model.region_topic
     var_obs = cistopic_obj.region_data
@@ -37,6 +39,8 @@ def convert_to_region_topic_adata(cistopic_obj, keep_projections=True, save_path
     return region_topic_adata
 
 def convert_to_adata(cistopic_obj, keep_projections=True, save_path=None):
+    import anndata as ad
+
     binary_matrix = cistopic_obj.binary_matrix.T
     fragment_matrix = cistopic_obj.fragment_matrix.T
     cell_obs = cistopic_obj.cell_data

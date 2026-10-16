@@ -3,148 +3,13 @@ from __future__ import annotations
 import logging
 import math
 import sys
-from typing import TYPE_CHECKING, Literal, Self
+from typing import Literal
 
-import matplotlib
-import matplotlib.pyplot as plt
 import numba
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
 import polars as pl
-
-if TYPE_CHECKING:
-    from pycisTopic.cistopic_class import CistopicObject
-
-from scenicplus_core.algorithms import get_nonzero_row_indices
-
-
-def rank_imputed_accessibility(
-    imputed_acc: npt.NDArray[np.float32],
-    seed: int = 123,
-    engine: Literal["numpy", "polars"] = "polars",
-) -> npt.NDArray[np.int32]:
-    """
-    Generate rankings per cell based on the imputed accessibility scores per region.
-
-    Parameters
-    ----------
-    imputed_acc
-        Imputed accessibility matrix (regions x cells).
-    seed
-        Random seed to ensure reproducibility of the rankings when there are ties.
-        Results are only reproducible when both the same seed and the same method
-        are used.
-    engine
-        Engine to use to calculate rankings of imputed accessibility scores per cell.
-        Options are ``numpy`` (same rankings as with older versions of pycisTopic)
-        or ``polars`` (fastest).
-
-    Returns
-    -------
-    Numpy array (regions x cells) containing rankings per cell based on the imputed
-    accessibility scores per region (regions x cells).
-
-    """
-    if engine != "numpy" and engine != "polars":
-        raise ValueError(
-            f'Invalid engine ("{engine}") for ranking implementation. Use "numpy" or "polars".'
-        )
-
-    # Initialize random number generator, for handling ties in the imputed accessibility
-    # scores in a reproducible way. This ensures that the same random rankings will be
-    # assigned for tied scores per cell each time this function is ran with the same
-    # seed and engine.
-    rng = np.random.default_rng(seed=seed)
-
-    # Function to make rankings per array.
-    def rank_scores_and_assign_random_ranking_in_range_for_ties_with_numpy(
-        imputed_acc_scores_for_cell_with_ties_numpy: npt.NDArray[np.float32],
-    ) -> npt.NDArray[np.int32]:
-        # Rank all imputed accessibility scores per cell and assign a random ranking in
-        # range for regions with the same imputed accessibility score.
-        #   - Create a random permutation of the indexes of the input array.
-        #   - Create an empty array for the rankings.
-        #   - Use argsort on the negative imputed accessibility scores to get the
-        #     ranking order (highest score gets rank 0).
-        #   - Use the random permutation to break ties in the scores, so that regions
-        #     with the same score get a random ranking in the range of their scores
-        #     instead of depending on the order in which they appear in the input array.
-        random_permutations_to_break_ties_numpy = rng.permutation(
-            imputed_acc_scores_for_cell_with_ties_numpy.shape[0]
-        )
-        imputed_acc_rankings_with_broken_ties_for_cell_numpy = np.empty(
-            imputed_acc_scores_for_cell_with_ties_numpy.shape[0],
-            dtype=np.int32,
-        )
-        imputed_acc_rankings_with_broken_ties_for_cell_numpy[
-            random_permutations_to_break_ties_numpy[
-                (-imputed_acc_scores_for_cell_with_ties_numpy)[
-                    random_permutations_to_break_ties_numpy
-                ].argsort()
-            ]
-        ] = np.arange(
-            imputed_acc_scores_for_cell_with_ties_numpy.shape[0],
-            dtype=np.int32,
-        )
-
-        return imputed_acc_rankings_with_broken_ties_for_cell_numpy
-
-    def rank_scores_and_assign_random_ranking_in_range_for_ties_with_polars(
-        imputed_acc_scores_for_cell_with_ties_numpy: npt.NDArray[np.float32],
-        seed: int,
-    ) -> npt.NDArray[np.int32]:
-        # Rank all imputed accessibility scores per cell and assign a random ranking in
-        # range for regions with the same imputed accessibility score.
-        #   - Convert numpy array to Polars Series.
-        #   - Replace NaN values with the minimum value of the dtype, so NaNs are
-        #     ranked last.
-        #   - Use the `rank` engine from Polars to assign ranks, using the "random"
-        #     engine to break ties so that regions with the same score get a random
-        #     ranking in the range of their scores instead of depending on the order
-        #     in which they appear in the input array.
-        #   - Subtract 1 from the ranks to make them zero-based.
-        return (
-            (
-                pl.Series(imputed_acc_scores_for_cell_with_ties_numpy)
-                .fill_nan(
-                    float(
-                        np.finfo(imputed_acc_scores_for_cell_with_ties_numpy.dtype).min
-                    )
-                )
-                .rank(method="random", descending=True, seed=seed)
-                - 1
-            )
-            .cast(pl.Int32)
-            .to_numpy()
-        )
-
-    n_regions, n_cells = imputed_acc.shape
-
-    # Create zeroed imputed accessibility rankings database.
-    imputed_acc_rankings = np.zeros((n_regions, n_cells), dtype=np.int32)
-
-    # Rank all imputed accessibility scores per cell and assign a random ranking in
-    # range for regions with the same imputed accessibility score.
-    if engine == "numpy":
-        for cell_idx in range(n_cells):
-            imputed_acc_rankings[:, cell_idx] = (
-                rank_scores_and_assign_random_ranking_in_range_for_ties_with_numpy(
-                    imputed_acc[:, cell_idx]
-                )
-            )
-    else:
-        ranking_seeds = rng.integers(np.iinfo(np.int64).max, size=n_cells)
-
-        for cell_idx, ranking_seed in enumerate(ranking_seeds):
-            imputed_acc_rankings[:, cell_idx] = (
-                rank_scores_and_assign_random_ranking_in_range_for_ties_with_polars(
-                    imputed_acc[:, cell_idx],
-                    seed=ranking_seed,
-                )
-            )
-
-    return imputed_acc_rankings
 
 
 @numba.njit(parallel=False, error_model="numpy")
@@ -607,178 +472,6 @@ def calculate_per_region_mean_and_dispersion_on_normalized_imputed_acc(
     )
 
 
-def impute_accessibility(
-    cistopic_obj: CistopicObject,
-    selected_cells: list[str] | None = None,
-    selected_regions: list[str] | None = None,
-    scale_factor: int = 10**6,
-    chunk_size: int = 20000,
-    project: str = "cisTopic_Impute",
-):
-    """
-    Impute region accessibility.
-
-    Parameters
-    ----------
-    cistopic_obj: `class::CistopicObject`
-        A cisTopic object with a model in `class::CistopicObject.selected_model`.
-    selected_cells: list, optional
-        A list with selected cells to impute accessibility for. Default: None
-    selected_regions: list, optional
-        A list with selected regions to impute accessibility for. Default: None
-    scale_factor: int, optional
-        A number to multiply the imputed values for. This is useful to convert low
-        probabilities to 0, making the matrix more sparse. Default: 10**6.
-    chunk_size:
-        Chunk size used (number of regions for which imputed accessibility is
-        calculated at the same time).
-    project: str, optional
-        Name of the cisTopic imputation project. Default: ``cisTopic_impute``.
-
-    Return
-    ------
-    CistopicImputedFeatures
-
-    """
-    # Create cisTopic logger
-    level = logging.INFO
-    log_format = "%(asctime)s %(name)-12s %(levelname)-8s %(message)s"
-    handlers = [logging.StreamHandler(stream=sys.stdout)]
-    logging.basicConfig(level=level, format=log_format, handlers=handlers)
-    log = logging.getLogger("cisTopic")
-
-    model = cistopic_obj.selected_model
-    cell_names = cistopic_obj.cell_names
-    cell_topic = model.cell_topic.loc[:, cell_names]
-    region_names = cistopic_obj.region_names
-    topic_region = model.topic_region.loc[region_names]
-    if selected_cells is not None:
-        cell_topic = cell_topic.loc[:, selected_cells]
-        cell_names = selected_cells
-    if selected_regions is not None:
-        topic_region = topic_region.loc[selected_regions]
-        region_names = selected_regions
-    # Convert cell_topic and region_topic 2d arrays to np.float32 so
-    # multiplying them uses 4 times less memory than with np.float64
-    cell_topic = cell_topic.to_numpy().astype(np.float32)
-    topic_region = topic_region.to_numpy().astype(np.float32)
-
-    log.info("Imputing region accessibility")
-
-    def calculate_imputed_accessibility(
-        topic_region: np.ndarray,
-        cell_topic: np.ndarray,
-        region_names: list,
-        scale_factor: int,
-        chunk_size: int,
-    ) -> tuple[np.ndarray, list]:
-        """
-        Calculate imputed accessibility in chunks of chunk_size.
-
-        Parameters
-        ----------
-        topic_region:
-            Topic region matrix (regions x topics).
-        cell_topic:
-            Cell topic matrix (topic x cells).
-        region_names:
-            List of all region names.
-        scale_factor:
-            A number to multiply the imputed values for. This is useful to convert
-            low probabilities to 0, making the matrix more sparse. Default: 10**6.
-        chunk_size:
-            Chunk size used (number of regions for which imputed accessibility is
-            calculated at the same time).
-
-        Returns
-        -------
-        Numpy array with imputed accessibility for each region and a list of region
-        names (some regions for which all row values were 0 are filtered out).
-        (imputed_acc, region_names_to_keep)
-
-        """
-        output_chunk_end = 0
-        region_names_to_keep = []
-
-        # Create empty imputed accessibility matrix which will be filled in chunks.
-        imputed_acc = np.empty(
-            (topic_region.shape[0], cell_topic.shape[1]),
-            dtype=(
-                np.int32
-                if isinstance(scale_factor, int) and scale_factor != 1
-                else np.float32
-            ),
-        )
-
-        for input_chunk_start in range(0, topic_region.shape[0], chunk_size):
-            input_chunk_end = input_chunk_start + chunk_size
-
-            # Set correct output chunk start position.
-            output_chunk_start = output_chunk_end
-
-            log.info(
-                "Impute region accessibility for regions "
-                f"{input_chunk_start}-{input_chunk_end}"
-            )
-            topic_region_chunk = topic_region[
-                input_chunk_start : input_chunk_start + chunk_size
-            ]
-            imputed_acc_chunk = topic_region_chunk @ cell_topic
-
-            if isinstance(scale_factor, int) and scale_factor != 1:
-                # Scale imputed accessibility matrix chunk.
-                imputed_acc_chunk *= np.float32(scale_factor)
-
-                # Convert from float32 to int32.
-                # This will convert very small values to zero.
-                imputed_acc_chunk = imputed_acc_chunk.astype(np.int32)
-
-            # Get all region index positions of the matrix for which
-            # the whole row is not completely zero.
-            region_idx_to_keep_chunk = non_zero_rows(imputed_acc_chunk)
-
-            # Get all region names that need to be kept for this chunk.
-            region_names_in_chunk = region_names[input_chunk_start:input_chunk_end]
-            region_names_to_keep.extend(
-                [
-                    region_names_in_chunk[region_idx_in_chunk]
-                    for region_idx_in_chunk in region_idx_to_keep_chunk
-                ]
-            )
-
-            # Set correct output chunk end position by taking into account
-            # that rows with all zeros will be filtered out.
-            output_chunk_end = output_chunk_start + len(region_idx_to_keep_chunk)
-
-            # Convert from float32 to int32 and fill in the values in the full
-            # imputed accessibility matrix.
-            imputed_acc[output_chunk_start:output_chunk_end, :] = imputed_acc_chunk[
-                region_idx_to_keep_chunk
-            ]
-
-        # Only retain that part of the imputed accessibility matrix that was actually
-        # filled in.
-        imputed_acc = imputed_acc[0:output_chunk_end]
-
-        return imputed_acc, region_names_to_keep
-
-    # Fill `imputed_acc` matrix in chunks of 20000.
-    imputed_acc, region_names_to_keep = calculate_imputed_accessibility(
-        topic_region=topic_region,
-        cell_topic=cell_topic,
-        region_names=region_names,
-        scale_factor=scale_factor,
-        chunk_size=chunk_size,
-    )
-
-    imputed_acc_obj = CistopicImputedFeatures(
-        imputed_acc, region_names_to_keep, cell_names, project
-    )
-
-    log.info("Done!")
-    return imputed_acc_obj
-
-
 def find_highly_variable_regions(
     regions: list[str],
     per_region_means_on_normalized_imputed_acc: npt.NDArray[np.float64],
@@ -942,6 +635,9 @@ def find_highly_variable_regions(
     ]
 
     if plot:
+        import matplotlib
+        import matplotlib.pyplot as plt
+
         fig = plt.figure()
         matplotlib.rcParams["agg.path.chunksize"] = 10000
         plt.scatter(
@@ -1309,6 +1005,25 @@ def find_diff_accessible_regions(
 
 
 # TODO: Add these generic functions to another package
+@numba.njit
+def get_nonzero_row_indices(x: npt.NDArray[np.float32]):
+    """Get the indices of the rows that have at least one nonzero element."""
+    # Optimized version of:
+    #   np.nonzero(np.count_nonzero(x, axis=1))[0]
+    nonzero_row_indices = np.empty((x.shape[0],), dtype=np.intp)
+    output_idx = 0
+    for i in range(x.shape[0]):
+        for j in range(x.shape[1]):
+            if x[i, j] != 0:
+                # Found a nonzero element in the row, so keep the row index and go to
+                # the next row.
+                nonzero_row_indices[output_idx] = i
+                output_idx += 1
+                break
+    # Return row indices of nonzero rows (and truncate the array to the correct size).
+    return nonzero_row_indices[:output_idx]
+
+
 def p_adjust_bh(p: npt.NDArray):
     """Benjamini-Hochberg p-value correction for multiple hypothesis testing."""
     p = np.asarray(p, dtype='float')

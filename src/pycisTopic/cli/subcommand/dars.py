@@ -1,26 +1,18 @@
 from __future__ import annotations
 
+import math
 import os
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Sequence
 
 import polars as pl
 
 if TYPE_CHECKING:
     from argparse import ArgumentParser, _SubParsersAction
-    from pathlib import Path
 
-from pathlib import Path
-import math
-import numpy.typing as npt
-import numpy as np
-import anndata as ad
-from pycisTopic.diff_features import (
-    calculate_per_region_mean_and_dispersion_on_normalized_imputed_acc,
-    find_highly_variable_regions,
-    find_diff_accessible_regions,
-    get_marker_regions_for_contrast,
-)
+    import numpy as np
+    import numpy.typing as npt
 
 
 def read_regions_from_bed(bed_path: str | Path | os.PathLike) -> list[str]:
@@ -135,6 +127,8 @@ def filter_hv_regions_for_contrast(
     Subset of `highly_variable_regions` that have non-zero accessibility in at least
     one cell of (foreground + background).
     """
+    import numpy as np
+
     cell_name_to_idx = {c: i for i, c in enumerate(cell_names)}
     region_name_to_idx = {r: i for i, r in enumerate(region_names)}
 
@@ -262,6 +256,14 @@ def get_contrast_barcodes_lists(
 
 
 def run_compute_dars(args):
+    import anndata as ad
+    import numpy as np
+
+    from pycisTopic.diff_features import (
+        calculate_per_region_mean_and_dispersion_on_normalized_imputed_acc,
+        find_highly_variable_regions,
+        get_marker_regions_for_contrast,
+    )
 
     region_topic_h5ad: str = args.region_topic_h5ad
     cell_topic_h5ad: str = args.cell_topic_h5ad
@@ -468,6 +470,14 @@ def run_compute_dars(args):
 
 
 def run_compute_hv_regions(args):
+    import anndata as ad
+    import numpy as np
+
+    from pycisTopic.diff_features import (
+        calculate_per_region_mean_and_dispersion_on_normalized_imputed_acc,
+        find_highly_variable_regions,
+    )
+
     output_bed: str = args.output_bed
     plot_path: str | None = args.plot
 
