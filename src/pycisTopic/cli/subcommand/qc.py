@@ -110,6 +110,11 @@ def qc(
     # Remove trailing dot(s) from the output prefix.
     output_prefix = output_prefix.rstrip(".")
 
+    # Create output directory if needed.
+    output_dir = os.path.dirname(output_prefix)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
     class RelativeSeconds(logging.Formatter):
         def format(self, record):
             record.relativeCreated = record.relativeCreated // 1000

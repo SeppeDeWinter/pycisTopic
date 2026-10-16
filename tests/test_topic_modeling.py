@@ -257,3 +257,31 @@ def test_cli_create_anndata(mallet_output, rng, tmp_path):
     result = subprocess.run(base, capture_output=True, text=True)
     assert result.returncode != 0
     assert "Provide the binary accessibility matrix" in result.stderr
+
+
+def test_cli_create_anndata_with_qc_stats(mallet_output, rng, tmp_path):
+    import polars as pl
+
+    filenames, _, _ = mallet_output
+    _, cell_barcodes, _ = _write_matrix_files(tmp_path / "matrix", rng)
+    qc_dir = tmp_path / "qc"
+    qc_dir.mkdir()
+    # QC statistics contain the original cell barcodes ("-1" removed in the matrix).
+    pl.DataFrame(
+        {
+            "CB": [cb.removesuffix("___s1") + "-1" for cb in cell_barcodes],
+            "tss_enrichment": np.arange(N_CELLS, dtype=float),
+        }
+    ).write_parquet(qc_dir / "s1.fragments_stats_per_cb.parquet")
+    subprocess.run(
+        [
+            *CLI, "create_anndata", "-o", filenames.output_prefix, "-t", str(N_TOPICS),
+            "-i", str(tmp_path / "matrix.matrix.mtx"), "--qc_dir", str(qc_dir),
+            "-d", "-1",
+        ],
+        check=True,
+        capture_output=True,
+    )  # fmt: skip
+    adata = anndata.read_h5ad(filenames.anndata_filename)
+    assert adata.obs["tss_enrichment"].tolist() == list(range(N_CELLS))
+    assert set(adata.obs["sample_id"]) == {"s1"}

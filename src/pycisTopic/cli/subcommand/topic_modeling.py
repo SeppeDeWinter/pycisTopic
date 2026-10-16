@@ -292,13 +292,39 @@ def run_create_anndata_from_mallet(args):
 
         binary_matrix = scipy.io.mmread(args.binary_matrix)
 
-    create_anndata_from_mallet(
+    adata = create_anndata_from_mallet(
         output_prefix=args.output_prefix,
         n_topics=args.n_topics,
         cell_barcodes=cell_barcodes,
         region_ids=region_ids,
         binary_matrix=binary_matrix,
+        write=args.qc_dir is None,
     )
+
+    if args.qc_dir is not None:
+        from pycisTopic.adata import add_qc_stats, read_qc_stats
+        from pycisTopic.topic_modeling.mallet_models import LDAMalletFilenames
+
+        sample_ids = sorted(
+            {
+                cb.rsplit(args.cb_sample_separator, 1)[1]
+                for cb in cell_barcodes
+                if args.cb_sample_separator in cb
+            }
+        )
+        print(f'Adding QC statistics from "{args.qc_dir}" for samples: {sample_ids}')
+        add_qc_stats(
+            adata,
+            read_qc_stats(
+                args.qc_dir,
+                sample_ids,
+                cb_end_to_remove=args.cb_end_to_remove,
+                cb_sample_separator=args.cb_sample_separator,
+            ),
+        )
+        filename = LDAMalletFilenames(args.output_prefix, args.n_topics).anndata_filename
+        print(f"Writing to: {filename}")
+        adata.write_h5ad(filename)
 
 
 def str_to_bool(v: str) -> bool:
@@ -852,6 +878,34 @@ def add_parser_topic_modeling(subparsers: _SubParsersAction[ArgumentParser]):
         action="store_true",
         help="Store the binary accessibility matrix (-i) in .X of the AnnData file. "
         "Default: do not store it (smaller file).",
+    )
+    parser_topic_modeling_mallet_anndata.add_argument(
+        "--qc_dir",
+        dest="qc_dir",
+        action="store",
+        type=str,
+        default=None,
+        help="Directory with `pycistopic qc run` output "
+        "(SAMPLE_ID.fragments_stats_per_cb.parquet) to add QC statistics to .obs.",
+    )
+    parser_topic_modeling_mallet_anndata.add_argument(
+        "-d",
+        "--cb_end_remove",
+        dest="cb_end_to_remove",
+        action="store",
+        type=str,
+        default=None,
+        help='Barcode suffix (e.g. "-1") that was removed when creating the count '
+        "matrix, to match QC statistics to cell barcodes. Default: None.",
+    )
+    parser_topic_modeling_mallet_anndata.add_argument(
+        "-s",
+        "--sample_sep",
+        dest="cb_sample_separator",
+        action="store",
+        type=str,
+        default="___",
+        help='Separator between cell barcode and sample ID. Default: "___".',
     )
     parser_topic_modeling_mallet_anndata.add_argument(
         "-o",

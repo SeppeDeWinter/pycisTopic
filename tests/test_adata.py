@@ -162,3 +162,32 @@ class TestAddQcStats:
         stats = pd.DataFrame({"CB": [CELLS[0], CELLS[0]], "x": [1, 2]})
         with pytest.raises(ValueError, match="not unique"):
             add_qc_stats(adata, stats)
+
+
+class TestReadQcStats:
+    @pytest.fixture
+    def qc_dir(self, tmp_path):
+        for sample, cbs in (("s1", ["AAA-1", "BBB-1"]), ("s2", ["AAA-1"])):
+            pl.DataFrame(
+                {
+                    "CB": pl.Series(cbs, dtype=pl.Categorical),
+                    "tss_enrichment": [float(len(sample))] * len(cbs),
+                }
+            ).write_parquet(tmp_path / f"{sample}.fragments_stats_per_cb.parquet")
+        return tmp_path
+
+    def test_read_qc_stats(self, qc_dir):
+        from pycisTopic.adata import read_qc_stats
+
+        stats = read_qc_stats(str(qc_dir), ["s1", "s2"], cb_end_to_remove="-1")
+        assert stats["CB"].to_list() == ["AAA___s1", "BBB___s1", "AAA___s2"]
+        assert stats["sample_id"].to_list() == ["s1", "s1", "s2"]
+
+    def test_missing_samples(self, qc_dir):
+        from pycisTopic.adata import read_qc_stats
+
+        with pytest.warns(UserWarning, match="s3.fragments_stats_per_cb.parquet"):
+            stats = read_qc_stats(str(qc_dir), ["s1", "s3"])
+        assert stats["CB"].to_list() == ["AAA-1___s1", "BBB-1___s1"]
+        with pytest.warns(UserWarning, match="not found"), pytest.raises(FileNotFoundError):
+            read_qc_stats(str(qc_dir), ["s3"])

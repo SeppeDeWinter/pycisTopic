@@ -136,8 +136,13 @@ def get_region_gene_weights(
     """
     use_boundaries = use_gene_boundaries or predefined_boundaries is not None
 
+    regions = regions.with_columns(pl.col("Chromosome").cast(pl.Utf8))
+    if predefined_boundaries is not None:
+        predefined_boundaries = predefined_boundaries.with_columns(
+            pl.col("Chromosome").cast(pl.Utf8)
+        )
     annot = gene_annotation.select(
-        pl.col("Chromosome"),
+        pl.col("Chromosome").cast(pl.Utf8),
         pl.col("Gene_start").cast(pl.Int64).alias("Start"),
         pl.col("Gene_end").cast(pl.Int64).alias("End"),
         pl.col("Strand"),
@@ -191,7 +196,7 @@ def get_region_gene_weights(
             space = promoters
 
         chrom_sizes = chrom_sizes.select(
-            pl.col("Chromosome"),
+            pl.col("Chromosome").cast(pl.Utf8),
             pl.col("Start").cast(pl.Int64),
             pl.col("End").cast(pl.Int64),
         )

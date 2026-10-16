@@ -147,3 +147,78 @@ def test_binarize_aucell(adata_file, tmp_path):
         "-a", "cell", "-m", "aucell", "-i", adata_file, "-p", out_dir,
     )
     assert (out_dir / "cell_Topic_1_binarized.txt").read_text()
+
+
+def test_topic_qc(adata_file, tmp_path):
+    output = tmp_path / "with_qc.h5ad"
+    table = tmp_path / "topics.tsv"
+    _run(
+        "topic_qc", "-a", adata_file, "-o", output, "--annotation", "cell_type",
+        "--table", table,
+    )  # fmt: skip
+    topics = anndata.read_h5ad(output).uns["pycistopic"]["topics"]
+    assert {"Gini_index", "cell_type", "is_general"} <= set(topics.columns)
+    table_df = pd.read_csv(table, sep="\t", index_col=0)
+    assert list(table_df.index) == list(topics.index)
+
+
+def test_topic_qc_missing_annotation(adata_file, tmp_path):
+    result = subprocess.run(
+        [*CLI, "topic_qc", "-a", str(adata_file), "-o", str(tmp_path / "x.h5ad"),
+         "--annotation", "missing"],
+        capture_output=True,
+        text=True,
+    )  # fmt: skip
+    assert result.returncode != 0
+    assert 'Column "missing" not found' in result.stderr
+
+
+def test_gene_activity(tmp_path, rng):
+    import polars as pl
+
+    from pycisTopic.gene_annotation import write_tss_annotation_to_bed
+
+    region_names = [f"chr1:{s}-{s + 500}" for s in range(0, 60_000, 1_000)]
+    cells = [f"cell{i}" for i in range(20)]
+    adata = create_anndata(
+        rng.dirichlet(np.ones(3), size=len(cells)),
+        rng.dirichlet(np.ones(len(region_names)), size=3).T,
+        cells,
+        region_names,
+        obs=pd.DataFrame({"cell_type": ["a", "b"] * 10}, index=cells),
+    )
+    adata.obsm["X_umap"] = rng.random((len(cells), 2))
+    adata.write_h5ad(tmp_path / "model.h5ad")
+    write_tss_annotation_to_bed(
+        pl.DataFrame(
+            {
+                "Chromosome": ["chr1", "chr1"],
+                "Gene_start": [10_000, 30_000],
+                "Gene_end": [20_000, 40_000],
+                "Gene": ["GeneA", "GeneB"],
+                "Score": [".", "."],
+                "Strand": ["+", "-"],
+                "TSS_start": [10_000, 39_999],
+                "TSS_end": [10_001, 40_000],
+                "Transcript_type": ["protein_coding"] * 2,
+                "Ensembl_gene_id": ["ENSG1", "ENSG2"],
+            }
+        ),
+        str(tmp_path / "tss.bed"),
+    )
+    (tmp_path / "chrom.sizes").write_text("chr1\t100000\n")
+    _run(
+        "gene_activity", "-a", tmp_path / "model.h5ad", "-t", tmp_path / "tss.bed",
+        "-c", tmp_path / "chrom.sizes", "-o", tmp_path / "ga.h5ad",
+        "--weights", tmp_path / "weights.tsv", "--upstream", 1000, 5000,
+    )  # fmt: skip
+    gene_activity = anndata.read_h5ad(tmp_path / "ga.h5ad")
+    assert list(gene_activity.var_names) == ["GeneA", "GeneB"]
+    assert list(gene_activity.obs_names) == cells
+    assert "X_umap" in gene_activity.obsm
+    assert gene_activity.uns["pycistopic"]["gene_activity"]["upstream"].tolist() == [
+        1000,
+        5000,
+    ]
+    weights = pl.read_csv(tmp_path / "weights.tsv", separator="\t")
+    assert set(weights["Gene"]) == {"GeneA", "GeneB"}

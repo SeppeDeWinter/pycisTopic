@@ -290,3 +290,60 @@ def add_qc_stats(
         columns=[c for c in stats.columns if c in adata.obs.columns]
     ).join(stats)
     return adata
+
+
+def read_qc_stats(
+    pycistopic_qc_output_dir: str,
+    sample_ids: Sequence[str],
+    cb_end_to_remove: str | None = None,
+    cb_sample_separator: str = "___",
+) -> pl.DataFrame:
+    """
+    Read QC statistics per cell barcode of ``pycistopic qc run`` for multiple samples.
+
+    Cell barcodes are converted to pycisTopic cell barcodes (``CB___sample_id``) in
+    the same way as by ``pycistopic count_matrix create``.
+
+    Parameters
+    ----------
+    pycistopic_qc_output_dir
+        Directory with ``{sample_id}.fragments_stats_per_cb.parquet`` files.
+    sample_ids
+        Sample IDs. Samples without QC statistics file are skipped with a warning.
+    cb_end_to_remove
+        Suffix to remove from the cell barcodes (e.g. ``"-1"``), as used when creating
+        the count matrix.
+    cb_sample_separator
+        Separator between cell barcode and sample ID.
+
+    Returns
+    -------
+    Polars DataFrame with QC statistics per cell barcode (``CB`` column) and a
+    ``sample_id`` column.
+
+    """
+    import os
+    import warnings
+
+    stats_per_sample = []
+    for sample_id in sample_ids:
+        filename = os.path.join(
+            pycistopic_qc_output_dir, f"{sample_id}.fragments_stats_per_cb.parquet"
+        )
+        if not os.path.exists(filename):
+            warnings.warn(f'QC statistics file "{filename}" not found.', stacklevel=2)
+            continue
+        cb = pl.col("CB").cast(pl.Utf8)
+        if cb_end_to_remove:
+            cb = cb.str.strip_suffix(cb_end_to_remove)
+        stats_per_sample.append(
+            pl.read_parquet(filename).with_columns(
+                (cb + pl.lit(f"{cb_sample_separator}{sample_id}")).alias("CB"),
+                pl.lit(sample_id).alias("sample_id"),
+            )
+        )
+    if not stats_per_sample:
+        raise FileNotFoundError(
+            f'No QC statistics files found in "{pycistopic_qc_output_dir}".'
+        )
+    return pl.concat(stats_per_sample, how="diagonal_relaxed")
