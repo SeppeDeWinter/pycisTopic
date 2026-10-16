@@ -835,7 +835,7 @@ def get_cbs_passing_filter(
         "unique_fragments_count" if collapse_duplicates else "total_fragments_count"
     )
 
-    if cbs:
+    if cbs is not None and len(cbs) > 0:
         cbs_series_pl = cbs_to_cbs_series_pl(cbs)
 
         fragments_stats_per_cb_filtered_df_pl = fragments_stats_per_cb_df_pl.join(

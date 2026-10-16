@@ -141,10 +141,6 @@ class TestFragmentStats:
         cbs, _ = get_cbs_passing_filter(stats, cbs=["CCC-1", "AAA-1"])
         assert sorted(cbs.cast(pl.Utf8).to_list()) == ["AAA-1", "CCC-1"]
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Bug: `if cbs:` is ambiguous for a polars Series.",
-    )
     def test_get_cbs_passing_filter_cb_series(self, fragments):
         stats = get_fragments_per_cb(fragments, min_fragments_per_cb=0)
         cbs, _ = get_cbs_passing_filter(stats, cbs=pl.Series(["CCC-1", "AAA-1"]))
