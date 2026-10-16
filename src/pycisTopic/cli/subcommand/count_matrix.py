@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 def run_create_count_matrix_from_fragment_files(args):
     create_count_matrix_from_fragment_files(
         sample_to_fragments_file_mapping_tsv_filename=args.sample_to_fragments_file_mapping_tsv_filename,
-        sample_to_cell_barcodes_file_mapping_tsv_filenames=args.sample_to_cell_barcodes_file_tsv_filenames,
+        sample_to_cell_barcodes_file_mapping_tsv_filenames=args.sample_to_cell_barcodes_file_mapping_tsv_filenames,
         regions_bed_filename=args.regions_bed_filename,
         output_prefix=args.output_prefix,
         blacklist_bed_filename=args.blacklist_bed_filename,

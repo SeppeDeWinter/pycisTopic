@@ -161,11 +161,6 @@ class TestSubsetAccessibilityMatrix:
 CLI = [sys.executable, "-m", "pycisTopic.cli.pycistopic", "count_matrix"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Bug: run_create_count_matrix_from_fragment_files reads a misspelled "
-    "argparse attribute (sample_to_cell_barcodes_file_tsv_filenames).",
-)
 def test_cli_create(small_files, mapping_files, tmp_path):
     sample_fragments, sample_barcodes = mapping_files
     prefix = tmp_path / "cli"
