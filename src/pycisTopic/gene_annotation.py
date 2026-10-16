@@ -782,14 +782,16 @@ def find_most_likely_chromosome_source_in_bed(
 
     """  # noqa: W505
     # Get all unique chromosome names from BED file.
-    chroms_from_bed = bed_df_pl.get_column("Chromosome").unique()
+    chroms_from_bed = bed_df_pl.get_column("Chromosome").cast(pl.Utf8).unique()
 
     # Find how often those chromosome names are found for each chromosome source
-    # (UCSC, Ensembl, GenBank and RefSeq).
+    # (UCSC, Ensembl, GenBank and RefSeq). Non-string columns (e.g. chromosome length)
+    # are skipped.
     chrom_source_stats_df_pl = chrom_sizes_and_alias_df_pl.select(
         [
-            pl.col(column_name).is_in(chroms_from_bed).sum()
-            for column_name in chrom_sizes_and_alias_df_pl.collect_schema().names()
+            pl.col(column_name).is_in(chroms_from_bed.implode()).sum()
+            for column_name, dtype in chrom_sizes_and_alias_df_pl.collect_schema().items()
+            if dtype == pl.Utf8
         ]
     )
 

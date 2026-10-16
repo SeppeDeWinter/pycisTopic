@@ -56,11 +56,6 @@ def test_chrom_alias_file(alias_mapping):
     assert alias_mapping.columns[:4] == ["ucsc", "ensembl", "genbank", "refseq"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Bug: `is_in` is also applied to the integer `length` column, which polars "
-    "rejects.",
-)
 def test_find_most_likely_chromosome_source(alias_mapping, tss_annotation):
     source, stats = find_most_likely_chromosome_source_in_bed(
         alias_mapping, tss_annotation
