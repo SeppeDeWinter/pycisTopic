@@ -767,7 +767,7 @@ def get_marker_regions_for_contrast(
     n_cells = cell_topic_subset.shape[1]
     # n_topics = region_topic_subset.shape[1]
 
-    adjusted_pvalues = np.zeros((n_regions,), dtype=np.float64)
+    wilcoxon_test_pvalues = np.zeros((n_regions,), dtype=np.float64)
     log2_fold_change = np.zeros((n_regions,), dtype=np.float64)
 
     log.info(
@@ -855,14 +855,13 @@ def get_marker_regions_for_contrast(
         imputed_acc_chunk_foreground_cells = imputed_acc_chunk[:, :n_foreground_cells]
         imputed_acc_chunk_background_cells = imputed_acc_chunk[:, n_foreground_cells:]
 
-        log.info("  - Calculate adjusted Wilcoxon test p-values.")
-        # Calculate Wilcoxon test p-values for each region in the current chunk
-        # and calculate adjusted p-values for them.
+        log.info("  - Calculate Wilcoxon test p-values.")
+        # Calculate Wilcoxon test p-values for each region in the current chunk.
+        # P-values are adjusted for multiple testing after all chunks are processed.
         wilcoxon_test_pvalues_chunk = ranksums_numba_multiple(
             imputed_acc_chunk_foreground_cells.astype(np.uint32),
             imputed_acc_chunk_background_cells.astype(np.uint32),
         )[1]
-        adjusted_pvalues_chunk = p_adjust_bh(wilcoxon_test_pvalues_chunk)
 
         log.info("  - Calculate log2 fold change.")
         # Calculate log2 fold change for each region in the current chunk between
@@ -871,15 +870,18 @@ def get_marker_regions_for_contrast(
             imputed_acc_chunk_foreground_cells, imputed_acc_chunk_background_cells
         )
 
-        # Fill full adjusted p-values and log2 fold change arrays with the values calculated on the current chunk.
-        adjusted_pvalues[output_regions_chunk_start:output_regions_chunk_end] = (
-            adjusted_pvalues_chunk
+        # Fill full p-values and log2 fold change arrays with the values calculated on the current chunk.
+        wilcoxon_test_pvalues[output_regions_chunk_start:output_regions_chunk_end] = (
+            wilcoxon_test_pvalues_chunk
         )
         log2_fold_change[output_regions_chunk_start:output_regions_chunk_end] = (
             log2_fold_change_chunk
         )
 
     del imputed_acc_chunk
+
+    # Benjamini-Hochberg correction over all tested regions.
+    adjusted_pvalues = p_adjust_bh(wilcoxon_test_pvalues)
 
     markers_df = (
         pl.DataFrame(

@@ -196,11 +196,6 @@ class TestMarkerRegions:
         # Sorted by decreasing log2 fold change.
         assert markers["Log2FC"].is_sorted(descending=True)
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Bug: Benjamini-Hochberg correction is applied per chunk of regions "
-        "instead of over all tested regions.",
-    )
     def test_results_do_not_depend_on_chunk_size(self, contrast):
         assert self._markers(contrast, regions_chunk_size=10_000).equals(
             self._markers(contrast, regions_chunk_size=50)
