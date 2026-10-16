@@ -62,7 +62,6 @@ plot = [
     "adjustText>=1.0.0",
     "matplotlib>=3.10.3",
 ]
-convert = ["lda", "ray", "scikit-learn"]
 
 [project.urls]
 Homepage = "https://github.com/aertslab/pycisTopic"

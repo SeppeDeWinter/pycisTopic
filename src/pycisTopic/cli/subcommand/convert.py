@@ -1,87 +1,36 @@
-def convert_to_cell_topic_adata(cistopic_obj, keep_projections=True, save_path=None):
-    import anndata as ad
+from __future__ import annotations
 
-    # convert cell_topic matrix and annotations
-    cell_topic = cistopic_obj.selected_model.cell_topic.T
-    cell_obs = cistopic_obj.cell_data
-    cell_obs.fillna('str_nan', inplace=True)
-    obsm_dict = {}
-    if keep_projections and cistopic_obj.projections['cell']:
-        for key in cistopic_obj.projections['cell'].keys():
-            obsm_dict[f'X_{key.lower()}'] = cistopic_obj.projections['cell'][key].to_numpy()
-    cell_topic_adata = ad.AnnData(X=cell_topic,
-                                  obs=cell_obs,
-                                  obsm=obsm_dict)
-    
-    if save_path is not None:
-        cell_topic_adata.write_h5ad(save_path)
-    
-    return cell_topic_adata
+from typing import TYPE_CHECKING
 
-def convert_to_region_topic_adata(cistopic_obj, keep_projections=True, save_path=None):
-    import anndata as ad
+if TYPE_CHECKING:
+    from argparse import ArgumentParser, _SubParsersAction
 
-    # convert cell_topic matrix and annotations
-    region_topic = cistopic_obj.selected_model.region_topic
-    var_obs = cistopic_obj.region_data
-    var_obs.fillna('str_nan', inplace=True)
-    obsm_dict = {}
-    if keep_projections and cistopic_obj.projections['region']:
-        for key in cistopic_obj.projections['region'].keys():
-            obsm_dict[f'X_{key.lower()}'] = cistopic_obj.projections['region'][key].to_numpy()
-    region_topic_adata = ad.AnnData(X=region_topic,
-                                  obs=var_obs,
-                                  obsm=obsm_dict)
-    
-    if save_path is not None:
-        region_topic_adata.write_h5ad(save_path)
-    
-    return region_topic_adata
-
-def convert_to_adata(cistopic_obj, keep_projections=True, save_path=None):
-    import anndata as ad
-
-    binary_matrix = cistopic_obj.binary_matrix.T
-    fragment_matrix = cistopic_obj.fragment_matrix.T
-    cell_obs = cistopic_obj.cell_data
-    var_obs = cistopic_obj.region_data
-    var_obs.fillna('str_nan', inplace=True)
-    cell_obs.fillna('str_nan', inplace=True)
-    path_to_fragments = cistopic_obj.path_to_fragments
-    obsm_dict = {}
-    if keep_projections:
-        if cistopic_obj.projections['region']:
-            for key in cistopic_obj.projections['region'].keys():
-                obsm_dict[f'X_{key.lower()}'] = cistopic_obj.projections['region'][key].to_numpy()
-        if cistopic_obj.projections['cell']:
-            for key in cistopic_obj.projections['cell'].keys():
-                obsm_dict[f'X_{key.lower()}'] = cistopic_obj.projections['cell'][key].to_numpy()
-    adata = ad.AnnData(X=binary_matrix,
-                                  obs=cell_obs,
-                                  var=var_obs,
-                                  obsm=obsm_dict,
-                                  layers={'fragments': fragment_matrix},
-                                  uns={'path_to_fragments': path_to_fragments})
-    if save_path is not None:
-        adata.write_h5ad(save_path)
-    return adata
 
 def run_convert(args):
-    if args.conversion_type == 'cell_topic':
-        convert_to_cell_topic_adata(args.cistopic_object, save_path=args.output_adata)
-    elif args.conversion_type == 'region_topic':
-        convert_to_region_topic_adata(args.cistopic_object, save_path=args.output_adata)
-    elif args.conversion_type == 'cellxpeak':
-        convert_to_adata(args.cistopic_object, save_path=args.output_adata)
-    else:
-        raise ValueError(f"Invalid conversion type: {args.conversion_type}. Please choose from 'cell_topic', 'region_topic', or 'cellxpeak'.")
-    
-def add_parser_convert(subparsers):
+    from pycisTopic.legacy import cistopic_object_to_anndata, read_legacy_pickle
+
+    print(f'Reading CistopicObject from "{args.cistopic_object}" ...')
+    cistopic_obj = read_legacy_pickle(args.cistopic_object)
+    adata = cistopic_object_to_anndata(
+        cistopic_obj, store_matrix=args.store_matrix
+    )
+    print(f"Created AnnData object with shape: {adata.shape}")
+    print(f'Writing AnnData to "{args.output_adata}" ...')
+    adata.write_h5ad(args.output_adata)
+
+
+def add_parser_convert(subparsers: _SubParsersAction[ArgumentParser]):
     """Creates an ArgumentParser to read the options for this script."""
     parser_convert = subparsers.add_parser(
         "convert",
-        help="Convert old cistopic objects to adata files"
+        help="Convert a CistopicObject (pycisTopic < 3) to a pycisTopic AnnData file.",
+        description="Convert a pickled CistopicObject of pycisTopic < 3 to a pycisTopic "
+        "AnnData (.h5ad) file (cells x regions) with the selected topic model in "
+        ".obsm['X_topic'] and .varm['topic'], cell data in .obs, region data in .var "
+        "and cell projections (e.g. UMAP) in .obsm. Only convert pickles from trusted "
+        "sources: unpickling can execute arbitrary code.",
     )
+    parser_convert.set_defaults(func=run_convert)
 
     parser_convert.add_argument(
         "-i",
@@ -90,9 +39,8 @@ def add_parser_convert(subparsers):
         action="store",
         type=str,
         required=True,
-        help="Path to the cistopic object file to be converted."
+        help="Path to the pickled CistopicObject file to convert.",
     )
-    
     parser_convert.add_argument(
         "-o",
         "--output_adata",
@@ -102,17 +50,10 @@ def add_parser_convert(subparsers):
         required=True,
         help="Path to the output .h5ad file.",
     )
-    
     parser_convert.add_argument(
-        "-t",
-        "--type",
-        dest="conversion_type",
-        action="store",
-        type=str,
-        required=True,
-        help="Type of conversion to perform (option: 'cell_topic', 'region_topic', 'cellxpeak')."
-    )
-    
-    parser_convert.set_defaults(
-        func=run_convert
+        "--store_matrix",
+        dest="store_matrix",
+        action="store_true",
+        help="Store the binary accessibility matrix in .X. Default: do not store it "
+        "(smaller file).",
     )
