@@ -32,7 +32,6 @@ classifiers = [
 dependencies = [
     "anndata>=0.11.4",
     "diptest>=0.8.0",
-    "joblib>=1.5.3",
     "ncls>=0.0.70",
     "numba>=0.59.0",
     "numpy>=1.24.0",
