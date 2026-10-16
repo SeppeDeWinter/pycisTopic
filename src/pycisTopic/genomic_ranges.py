@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal, overload
 
+import numpy as np
 import polars as pl
 
 if TYPE_CHECKING:
-    import numpy as np
     import numpy.typing as npt
 
 # Intersection/overlap code is based on:
@@ -1291,8 +1291,8 @@ def overlap(
 
     overlap_chrom_dfs_pl = {}
 
-    for chrom in list(regions1_per_chrom_dfs_pl.keys()):
-        if chrom in set(regions2_per_chrom_dfs_pl.keys()):
+    for chrom, regions1_chrom_df_pl in regions1_per_chrom_dfs_pl.items():
+        if chrom in regions2_per_chrom_dfs_pl:
             # Find overlap between regions from first and second per chromosome
             # dataframe and return index positions in first dataframe for those
             # overlaps.
@@ -1311,26 +1311,25 @@ def overlap(
                     how=how,
                 )
             )
+        else:
+            # No regions on this chromosome in the second set, so nothing overlaps.
+            regions1_indexes = np.empty((0,), dtype=np.int64)
 
-            # Skip empty intersections.
-            if regions1_indexes.shape[0] == 0:
-                continue
+        if invert:
+            # Get inverse selection of regions from first dataframe for the overlap.
+            # Regions on chromosomes without any overlap are all kept.
+            keep_mask = np.ones(regions1_chrom_df_pl.height, dtype=bool)
+            keep_mask[regions1_indexes] = False
+            overlap_chrom_df_pl = regions1_chrom_df_pl.filter(pl.Series(keep_mask))
+        else:
+            # Get selection of regions from first dataframe for the overlap.
+            overlap_chrom_df_pl = regions1_chrom_df_pl[regions1_indexes]
 
-            overlap_chrom_dfs_pl[chrom] = (
-                # Get inverse selection of regions from first dataframe for the
-                # overlap.
-                regions1_per_chrom_dfs_pl.pop(chrom)
-                .with_row_index()
-                .filter(
-                    ~pl.col("index").is_in(
-                        pl.Series("regions1_indexes", regions1_indexes)
-                    )
-                )
-                .drop("index")
-                if invert
-                # Get selection of regions from first dataframe for the overlap.
-                else regions1_per_chrom_dfs_pl.pop(chrom)[regions1_indexes]
-            )
+        # Skip empty overlaps.
+        if overlap_chrom_df_pl.height == 0:
+            continue
+
+        overlap_chrom_dfs_pl[chrom] = overlap_chrom_df_pl
 
     if len(list(overlap_chrom_dfs_pl.values())) == 0:
         # Return empty dataframe if there was no shared chromosome.
@@ -1343,3 +1342,230 @@ def overlap(
     )
 
     return overlap_df_pl
+
+
+def extend(
+    regions_df_pl: pl.DataFrame,
+    upstream: int | str = 0,
+    downstream: int | str = 0,
+) -> pl.DataFrame:
+    """
+    Extend regions upstream and downstream, taking the strand into account.
+
+    For regions on the ``"-"`` strand, upstream is towards higher coordinates.
+    All other regions (``"+"``, ``"."``) are extended as if on the ``"+"`` strand.
+
+    Parameters
+    ----------
+    regions_df_pl
+        Polars DataFrame containing BED entries with a ``Strand`` column.
+    upstream
+        Number of basepairs to extend upstream, or name of a column with the number
+        of basepairs to extend upstream per region.
+    downstream
+        Number of basepairs to extend downstream, or name of a column with the
+        number of basepairs to extend downstream per region.
+
+    Returns
+    -------
+    Polars DataFrame with extended regions. Start and End keep their original
+    data type.
+
+    Examples
+    --------
+    >>> regions_df_pl = pl.from_dict(
+    ...     {
+    ...         "Chromosome": ["chr1"] * 2,
+    ...         "Start": [100, 100],
+    ...         "End": [200, 200],
+    ...         "Strand": ["+", "-"],
+    ...     }
+    ... )
+    >>> extend(regions_df_pl, upstream=10, downstream=5)
+    shape: (2, 4)
+    ┌────────────┬───────┬─────┬────────┐
+    │ Chromosome ┆ Start ┆ End ┆ Strand │
+    │ ---        ┆ ---   ┆ --- ┆ ---    │
+    │ str        ┆ i64   ┆ i64 ┆ str    │
+    ╞════════════╪═══════╪═════╪════════╡
+    │ chr1       ┆ 90    ┆ 205 ┆ +      │
+    │ chr1       ┆ 95    ┆ 210 ┆ -      │
+    └────────────┴───────┴─────┴────────┘
+
+    """
+    upstream_expr = pl.col(upstream) if isinstance(upstream, str) else pl.lit(upstream)
+    downstream_expr = (
+        pl.col(downstream) if isinstance(downstream, str) else pl.lit(downstream)
+    )
+    is_minus_strand = pl.col("Strand") == "-"
+
+    return regions_df_pl.with_columns(
+        (
+            pl.col("Start")
+            - pl.when(is_minus_strand).then(downstream_expr).otherwise(upstream_expr)
+        ).cast(regions_df_pl.schema["Start"]),
+        (
+            pl.col("End")
+            + pl.when(is_minus_strand).then(upstream_expr).otherwise(downstream_expr)
+        ).cast(regions_df_pl.schema["End"]),
+    )
+
+
+def nearest(
+    regions1_df_pl: pl.DataFrame,
+    regions2_df_pl: pl.DataFrame,
+    how: Literal["upstream", "downstream", "previous", "next"],
+    regions2_suffix: str = "@2",
+) -> pl.DataFrame:
+    """
+    Find the nearest non-overlapping region of the second set for each first region.
+
+    Only regions of the second set that lie completely before (``"previous"``) or
+    after (``"next"``) a region of the first set are considered. For ``"upstream"``
+    and ``"downstream"``, the direction is relative to the strand of the region of
+    the first set (``"-"`` strand: upstream is towards higher coordinates); the
+    strand of the second set of regions is ignored.
+
+    The distance is the gap between both regions plus one (so bookended regions
+    have a distance of 1), which is the same convention as ``pyranges.nearest``.
+
+    Parameters
+    ----------
+    regions1_df_pl
+        Polars DataFrame containing BED entries for first set of regions. Needs a
+        ``Strand`` column when ``how`` is ``"upstream"`` or ``"downstream"``.
+    regions2_df_pl
+        Polars DataFrame containing BED entries for second set of regions.
+    how
+        Direction in which to look for the nearest region:
+        ``"upstream"``, ``"downstream"``, ``"previous"`` or ``"next"``.
+    regions2_suffix
+        Suffix added to the coordinate columns of the nearest second region.
+
+    Returns
+    -------
+    First set of regions (same order) with ``Start{regions2_suffix}``,
+    ``End{regions2_suffix}`` of the nearest region of the second set and the
+    ``Distance`` to it. Those columns are null when no such region exists.
+
+    Examples
+    --------
+    >>> genes_df_pl = pl.from_dict(
+    ...     {
+    ...         "Chromosome": ["chr1"] * 2,
+    ...         "Start": [100, 100],
+    ...         "End": [200, 200],
+    ...         "Strand": ["+", "-"],
+    ...     }
+    ... )
+    >>> boundaries_df_pl = pl.from_dict(
+    ...     {
+    ...         "Chromosome": ["chr1"] * 2,
+    ...         "Start": [10, 250],
+    ...         "End": [50, 300],
+    ...     }
+    ... )
+    >>> nearest(genes_df_pl, boundaries_df_pl, how="upstream")
+    shape: (2, 7)
+    ┌────────────┬───────┬─────┬────────┬─────────┬───────┬──────────┐
+    │ Chromosome ┆ Start ┆ End ┆ Strand ┆ Start@2 ┆ End@2 ┆ Distance │
+    │ ---        ┆ ---   ┆ --- ┆ ---    ┆ ---     ┆ ---   ┆ ---      │
+    │ str        ┆ i64   ┆ i64 ┆ str    ┆ i64     ┆ i64   ┆ i64      │
+    ╞════════════╪═══════╪═════╪════════╪═════════╪═══════╪══════════╡
+    │ chr1       ┆ 100   ┆ 200 ┆ +      ┆ 10      ┆ 50    ┆ 51       │
+    │ chr1       ┆ 100   ┆ 200 ┆ -      ┆ 250     ┆ 300   ┆ 51       │
+    └────────────┴───────┴─────┴────────┴─────────┴───────┴──────────┘
+
+    """
+    if how not in ("upstream", "downstream", "previous", "next"):
+        raise ValueError(
+            f'Invalid value for how ("{how}"). Use "upstream", "downstream", '
+            '"previous" or "next".'
+        )
+
+    start2_col = f"Start{regions2_suffix}"
+    end2_col = f"End{regions2_suffix}"
+
+    regions2_per_chrom_dfs_pl = {
+        str(chrom): regions2_chrom_df_pl
+        for (chrom,), regions2_chrom_df_pl in regions2_df_pl.partition_by(
+            ["Chromosome"],
+            as_dict=True,
+            maintain_order=True,
+        ).items()
+    }
+
+    nearest_chrom_dfs_pl = []
+
+    for (chrom,), regions1_chrom_df_pl in (
+        regions1_df_pl.with_row_index("_row_idx")
+        .partition_by(["Chromosome"], as_dict=True, maintain_order=True)
+        .items()
+    ):
+        n_regions1 = regions1_chrom_df_pl.height
+        nearest_start2 = np.zeros(n_regions1, dtype=np.int64)
+        nearest_end2 = np.zeros(n_regions1, dtype=np.int64)
+        distance = np.zeros(n_regions1, dtype=np.int64)
+        found = np.zeros(n_regions1, dtype=bool)
+
+        regions2_chrom_df_pl = regions2_per_chrom_dfs_pl.get(str(chrom))
+
+        if regions2_chrom_df_pl is not None and regions2_chrom_df_pl.height > 0:
+            start1 = regions1_chrom_df_pl.get_column("Start").to_numpy().astype(np.int64)
+            end1 = regions1_chrom_df_pl.get_column("End").to_numpy().astype(np.int64)
+            start2 = regions2_chrom_df_pl.get_column("Start").to_numpy().astype(np.int64)
+            end2 = regions2_chrom_df_pl.get_column("End").to_numpy().astype(np.int64)
+
+            if how in ("previous", "next"):
+                look_previous = np.full(n_regions1, how == "previous")
+            else:
+                is_minus_strand = (
+                    regions1_chrom_df_pl.get_column("Strand").to_numpy() == "-"
+                )
+                look_previous = (
+                    ~is_minus_strand if how == "upstream" else is_minus_strand
+                )
+
+            # Previous: region of second set with the largest end <= start1.
+            order_by_end2 = np.argsort(end2, kind="stable")
+            end2_sorted = end2[order_by_end2]
+            previous_idx = np.searchsorted(end2_sorted, start1, side="right") - 1
+            has_previous = previous_idx >= 0
+            previous_idx = order_by_end2[np.maximum(previous_idx, 0)]
+
+            # Next: region of second set with the smallest start >= end1.
+            order_by_start2 = np.argsort(start2, kind="stable")
+            start2_sorted = start2[order_by_start2]
+            next_idx = np.searchsorted(start2_sorted, end1, side="left")
+            has_next = next_idx < start2.shape[0]
+            next_idx = order_by_start2[np.minimum(next_idx, start2.shape[0] - 1)]
+
+            nearest_idx = np.where(look_previous, previous_idx, next_idx)
+            found = np.where(look_previous, has_previous, has_next)
+            nearest_start2 = start2[nearest_idx]
+            nearest_end2 = end2[nearest_idx]
+            distance = np.where(
+                look_previous,
+                start1 - nearest_end2 + 1,
+                nearest_start2 - end1 + 1,
+            )
+
+        found_series = pl.Series(found)
+        nearest_chrom_dfs_pl.append(
+            regions1_chrom_df_pl.with_columns(
+                pl.when(found_series)
+                .then(pl.Series(nearest_start2))
+                .alias(start2_col),
+                pl.when(found_series).then(pl.Series(nearest_end2)).alias(end2_col),
+                pl.when(found_series).then(pl.Series(distance)).alias("Distance"),
+            )
+        )
+
+    if len(nearest_chrom_dfs_pl) == 0:
+        return regions1_df_pl.with_columns(
+            pl.lit(None, dtype=pl.Int64).alias(start2_col),
+            pl.lit(None, dtype=pl.Int64).alias(end2_col),
+            pl.lit(None, dtype=pl.Int64).alias("Distance"),
+        )
+
+    return pl.concat(nearest_chrom_dfs_pl).sort("_row_idx").drop("_row_idx")
