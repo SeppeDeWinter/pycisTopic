@@ -121,14 +121,9 @@ def _reference_loglikelihood(nzw, ndz, alpha, eta):
     return ll
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Bug: loglikelihood overwrites (=) instead of accumulates (+=) the "
-    "per word/document terms (also in pycisTopic master).",
-)
 def test_loglikelihood_matches_reference(rng):
     nzw = rng.integers(0, 10, (3, 8))
-    ndz = rng.integers(0, 10, (5, 3))
+    ndz = rng.integers(0, 10, (5, 3)) * 0.7  # cell-topic counts are not integers
     assert loglikelihood(nzw, ndz, 0.5, 0.1) == pytest.approx(
         _reference_loglikelihood(nzw, ndz, 0.5, 0.1)
     )

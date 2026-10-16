@@ -21,37 +21,46 @@ class JsonNumpyEncode(json.JSONEncoder):
 
 
 def loglikelihood(nzw, ndz, alpha, eta):
-    D = ndz.shape[0]
-    n_topics = ndz.shape[1]
+    """
+    Calculate the log likelihood of a LDA model.
+
+    Same formula as used by the `lda` package (``lda._lda._loglikelihood``).
+
+    Parameters
+    ----------
+    nzw
+        Topic-word (topic-region) counts (topics x words).
+    ndz
+        Document-topic (cell-topic) counts (documents x topics).
+    alpha
+        Dirichlet prior on the document-topic distributions.
+    eta
+        Dirichlet prior on the topic-word distributions.
+
+    Returns
+    -------
+    Log likelihood.
+
+    """
+    nzw = np.asarray(nzw, dtype=np.float64)
+    ndz = np.asarray(ndz, dtype=np.float64)
+    n_docs, n_topics = ndz.shape
     vocab_size = nzw.shape[1]
 
-    const_prior = (n_topics * math.lgamma(alpha) - math.lgamma(alpha * n_topics)) * D
-    const_ll = (
-        vocab_size * math.lgamma(eta) - math.lgamma(eta * vocab_size)
-    ) * n_topics
+    const_prior = (n_topics * math.lgamma(alpha) - math.lgamma(alpha * n_topics)) * n_docs
+    const_ll = (vocab_size * math.lgamma(eta) - math.lgamma(eta * vocab_size)) * n_topics
 
-    # calculate log p(w|z)
-    topic_ll = 0
-    for k in range(n_topics):
-        sum = eta * vocab_size
-        for w in range(vocab_size):
-            if nzw[k, w] > 0:
-                topic_ll = math.lgamma(nzw[k, w] + eta)
-                sum += nzw[k, w]
-        topic_ll -= math.lgamma(sum)
+    # Calculate log p(w|z).
+    topic_ll = scipy.special.gammaln(nzw[nzw > 0] + eta).sum() - scipy.special.gammaln(
+        nzw.sum(axis=1) + eta * vocab_size
+    ).sum()
 
-    # calculate log p(z)
-    doc_ll = 0
-    for d in range(D):
-        sum = alpha * n_topics
-        for k in range(n_topics):
-            if ndz[d, k] > 0:
-                doc_ll = math.lgamma(ndz[d, k] + alpha)
-                sum += ndz[d, k]
-        doc_ll -= math.lgamma(sum)
+    # Calculate log p(z).
+    doc_ll = scipy.special.gammaln(ndz[ndz > 0] + alpha).sum() - scipy.special.gammaln(
+        ndz.sum(axis=1) + alpha * n_topics
+    ).sum()
 
-    ll = doc_ll - const_prior + topic_ll - const_ll
-    return ll
+    return float(doc_ll - const_prior + topic_ll - const_ll)
 
 
 def calculate_model_evaluation_stats(
