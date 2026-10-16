@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-from multiprocessing import cpu_count
 from typing import TYPE_CHECKING
 
 import numpy as np
 import numpy.typing as npt
-import pandas as pd  # type: ignore
 import polars as pl
-from ctxcore.aucell import aucell4r  # type: ignore
-from ctxcore.genesig import GeneSignature  # type: ignore
 
+from pycisTopic.aucell import aucell
 from pycisTopic.genomic_ranges import intersection
 from pycisTopic.imputed_accessibility import (
     impute_accessibility_chunked,
@@ -40,15 +37,6 @@ def _polars_granges_to_region_names(
             )
         )
     )["region_names"].to_list()
-
-def _region_names_to_signature(
-    region_names: list[str],
-    name: str,
-) -> GeneSignature:
-    weights = np.ones(len(region_names))
-    return GeneSignature(
-        name=name, gene2weight=dict(zip(region_names, weights))
-    )
 
 def signature_enrichment(
     region_topic: npt.NDArray[np.float32],
@@ -133,14 +121,11 @@ def signature_enrichment(
             }
         )
 
-    # Convert granges signatures to gene signatures
-    gs_signatures_consensus: list[GeneSignature] = [
-        _region_names_to_signature(
-            region_names=_polars_granges_to_region_names(granges),
-            name=signature
-        )
+    # Convert granges signatures to region names.
+    region_names_signatures_consensus: dict[str, list[str]] = {
+        signature: _polars_granges_to_region_names(granges)
         for signature, granges in gr_signatures_consensus.items()
-    ]
+    }
 
     # initialize aucell values
     n_cells = cell_topic.shape[1]
@@ -159,21 +144,16 @@ def signature_enrichment(
         if log is not None:
             log.info("Generating ranking.")
         ranking_chunk = rank_imputed_accessibility(
-            imputed_accessibility=imputed_acc_chunk,
+            imputed_acc=imputed_acc_chunk,
             seed=seed
         )
         if log is not None:
             log.info("Calculating AUCs.")
-        aucell_values[cell_start: cell_end] = aucell4r(
-            df_rnk=pd.DataFrame(
-                ranking_chunk.T,
-                columns=region_names
-            ),
-            signatures=gs_signatures_consensus, # type: ignore
+        aucell_values[cell_start: cell_end] = aucell(
+            rankings=ranking_chunk,
+            region_names=region_names,
+            signatures=region_names_signatures_consensus,
             auc_threshold=auc_threshold,
-            noweights=False,
-            normalize=False,
-            num_workers=min(chunk_size, cpu_count()),
-        ).to_numpy()
+        )
 
     return aucell_values / aucell_values.max(axis=0) if normalize else aucell_values
