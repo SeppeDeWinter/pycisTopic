@@ -10,6 +10,7 @@ from pycisTopic.cli.subcommand.signature_enrichment import (
 from pycisTopic.cli.subcommand.topic_modeling import add_parser_topic_modeling
 from pycisTopic.cli.subcommand.tss import add_parser_tss
 from pycisTopic.cli.subcommand.dars import add_parser_dars
+from pycisTopic.cli.subcommand.peak_calling import add_parser_peak_calling
 
 
 def main():
@@ -29,6 +30,7 @@ def main():
     add_parser_count_matrix(subparsers)
     add_parser_dars(subparsers)
     add_parser_signature_enrichment(subparsers)
+    add_parser_peak_calling(subparsers)
 
     args = parser.parse_args()
     args.func(args)
