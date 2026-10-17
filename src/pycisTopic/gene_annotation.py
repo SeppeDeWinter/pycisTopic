@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import re
 from collections.abc import Sequence
 from pathlib import Path
@@ -14,6 +15,9 @@ from pycisTopic.categoricals import PycisTopicCategoricals
 
 if TYPE_CHECKING:
     import pandas as pd
+
+
+logger = logging.getLogger(__name__)
 
 
 def get_all_gene_annotation_ensembl_biomart_dataset_names(
@@ -180,16 +184,6 @@ def get_tss_annotation_from_ensembl(
     """
     import pybiomart as pbm
 
-    # Check if the installed pybiomart version supports the dtypes argument.
-    #   - pybiomart 0.2.0 does not support the dtypes argument.
-    #   - "latest" git version (from 2018) does support the dtypes argument:
-    #         pip install git+https://github.com/jrderuiter/pybiomart@7802d45fe88549ab0512d6f37f815fc43b172b39
-    pybiomart_dataset_query_has_dtypes_arg = (
-        "dtypes" in pbm.Dataset.query.__code__.co_varnames
-    )
-
-    dataset = pbm.Dataset(name=biomart_name, host=biomart_host, use_cache=use_cache)
-
     ensembl_tss_annotation_dtypes = {
         "Chromosome/scaffold name": str,
         "Gene start (bp)": int,
@@ -201,31 +195,65 @@ def get_tss_annotation_from_ensembl(
         "Gene stable ID": str,
     }
 
-    ensembl_tss_annotation = dataset.query(
-        attributes=[
-            "chromosome_name",
-            "start_position",
-            "end_position",
-            "external_gene_name",
-            "strand",
-            "transcription_start_site",
-            "transcript_biotype",
-            "ensembl_gene_id",
-        ],
-        filters={"transcript_biotype": transcript_type} if transcript_type else None,
-        # Only include dtypes argument if supported by the installed pybiomart version.
-        **(
-            {"dtypes": ensembl_tss_annotation_dtypes}
-            if pybiomart_dataset_query_has_dtypes_arg
-            else {}
-        ),
-    )
+    def query_biomart(use_cache: bool) -> pd.DataFrame:
+        import warnings
 
-    if not pybiomart_dataset_query_has_dtypes_arg:
-        # Convert columns to correct datatypes afterwards for pybiomart 0.2.0.
-        ensembl_tss_annotation = ensembl_tss_annotation.astype(
-            ensembl_tss_annotation_dtypes
+        import pandas as pd
+
+        dataset = pbm.Dataset(name=biomart_name, host=biomart_host, use_cache=use_cache)
+        with warnings.catch_warnings():
+            # Column types are set below.
+            warnings.simplefilter("ignore", pd.errors.DtypeWarning)
+            return dataset.query(
+                attributes=[
+                    "chromosome_name",
+                    "start_position",
+                    "end_position",
+                    "external_gene_name",
+                    "strand",
+                    "transcription_start_site",
+                    "transcript_biotype",
+                    "ensembl_gene_id",
+                ],
+                filters=(
+                    {"transcript_biotype": transcript_type} if transcript_type else None
+                ),
+            )
+
+    def missing_columns(annotation: pd.DataFrame) -> list[str]:
+        return [
+            column
+            for column in ensembl_tss_annotation_dtypes
+            if column not in annotation.columns
+        ]
+
+    ensembl_tss_annotation = query_biomart(use_cache=use_cache)
+
+    if missing_columns(ensembl_tss_annotation) and use_cache:
+        # pybiomart also caches invalid responses (e.g. when the BioMart server had a
+        # temporary problem), so retry without cache and remove the invalid response
+        # from the cache.
+        import requests_cache
+
+        logger.warning(
+            "Invalid response from Ensembl BioMart (cached). Retrying without cache."
         )
+        requests_cache.clear()
+        ensembl_tss_annotation = query_biomart(use_cache=False)
+
+    missing = missing_columns(ensembl_tss_annotation)
+    if missing:
+        raise RuntimeError(
+            f'Ensembl BioMart ("{biomart_host}") did not return the expected columns '
+            f'{missing} for dataset "{biomart_name}" (columns: '
+            f"{ensembl_tss_annotation.columns.to_list()[:5]}). The BioMart server might "
+            "be temporarily unavailable: try again later or use another Ensembl "
+            "mirror or archive (biomart_host)."
+        )
+
+    ensembl_tss_annotation = ensembl_tss_annotation.astype(
+        ensembl_tss_annotation_dtypes
+    )
 
     ensembl_tss_annotation_bed_df_pl = pl.from_pandas(ensembl_tss_annotation).select(
         [

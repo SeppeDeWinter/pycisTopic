@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import ClassVar
+
 import polars as pl
 import pytest
 
@@ -81,3 +83,65 @@ def test_change_chromosome_source(alias_mapping, tss_annotation):
         "unplaced",  # unknown chromosome names are kept
     ]
     assert result.columns == tss_annotation.columns
+
+
+class _FakeDataset:
+    """Fake pybiomart Dataset: invalid (cached) response when use_cache=True."""
+
+    calls: ClassVar[list[bool]] = []
+    always_invalid = False
+
+    def __init__(self, name, host, use_cache):
+        self.use_cache = use_cache
+
+    def query(self, attributes, filters):
+        import pandas as pd
+
+        _FakeDataset.calls.append(self.use_cache)
+        if self.use_cache or _FakeDataset.always_invalid:
+            return pd.DataFrame({"<html>": ["Service unavailable"]})
+        return pd.DataFrame(
+            {
+                "Chromosome/scaffold name": ["1", "1"],
+                "Gene start (bp)": [11, 101],
+                "Gene end (bp)": [50, 200],
+                "Gene name": ["G1", "G2"],
+                "Strand": [1, -1],
+                "Transcription start site (TSS)": [11, 200],
+                "Transcript type": ["protein_coding", "protein_coding"],
+                "Gene stable ID": ["ENSG1", "ENSG2"],
+            }
+        )
+
+
+@pytest.fixture
+def fake_biomart(monkeypatch):
+    import pybiomart
+    import requests_cache
+
+    cleared = []
+    _FakeDataset.calls = []
+    _FakeDataset.always_invalid = False
+    monkeypatch.setattr(pybiomart, "Dataset", _FakeDataset)
+    monkeypatch.setattr(requests_cache, "clear", lambda: cleared.append(True))
+    return cleared
+
+
+def test_get_tss_annotation_retries_invalid_cached_response(fake_biomart):
+    from pycisTopic.gene_annotation import get_tss_annotation_from_ensembl
+
+    annotation = get_tss_annotation_from_ensembl("hsapiens_gene_ensembl")
+    assert _FakeDataset.calls == [True, False]
+    assert fake_biomart == [True]
+    assert annotation["Gene"].to_list() == ["G1", "G2"]
+    assert annotation["TSS_start"].to_list() == [10, 199]
+    assert annotation["Strand"].to_list() == ["+", "-"]
+
+
+def test_get_tss_annotation_invalid_response(fake_biomart):
+    from pycisTopic.gene_annotation import get_tss_annotation_from_ensembl
+
+    _FakeDataset.always_invalid = True
+    with pytest.raises(RuntimeError, match="BioMart server might be temporarily"):
+        get_tss_annotation_from_ensembl("hsapiens_gene_ensembl", use_cache=False)
+    assert _FakeDataset.calls == [False]
