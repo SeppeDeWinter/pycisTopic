@@ -4,6 +4,7 @@ import numpy as np
 import polars as pl
 import pytest
 from scipy.stats import gaussian_kde
+from tss_profile_reference import reference_tss_profile
 
 from pycisTopic.categoricals import PycisTopicCategoricals
 from pycisTopic.qc import (
@@ -87,7 +88,12 @@ class TestTssProfile:
             }
         )
         _, _, per_cb = get_tss_profile(
-            fragments, tss, flank_window=300, smoothing_rolling_window=1, min_norm=1.0
+            fragments,
+            tss,
+            flank_window=300,
+            smoothing_rolling_window=1,
+            min_norm=1.0,
+            tss_norm_matrix_per_cb_cbs=pl.Series(["A", "B"]),
         )
         counts = {
             cb: per_cb.filter(pl.col(cb) > 0)["position_from_tss"].to_list()
@@ -104,13 +110,99 @@ class TestTssProfile:
         )
         assert sample_profile.height == 2001
         assert sample_profile["position_from_tss"].to_list()[0] == -1000
-        assert per_cb.width == 1 + fragments["CB"].n_unique()
+        assert per_cb is None
         tss_enrichment = dict(
             zip(enrichment["CB"].cast(pl.Utf8), enrichment["tss_enrichment"])
         )
         good = np.mean([v for k, v in tss_enrichment.items() if k.startswith("good")])
         bad = np.mean([v for k, v in tss_enrichment.items() if k.startswith("bad")])
         assert good > 3 * bad
+
+    @pytest.mark.parametrize(
+        ("flank_window", "smoothing_rolling_window", "minimum_signal_window", "tss_window", "min_norm"),
+        [(1000, 10, 100, 50, 0.2), (300, 1, 20, 0, 1.0), (500, 25, 50, 100, 0.01)],
+    )
+    def test_matches_reference(
+        self,
+        fragments,
+        tss_annotation,
+        flank_window,
+        smoothing_rolling_window,
+        minimum_signal_window,
+        tss_window,
+        min_norm,
+    ):
+        # Add a duplicated TSS and a TSS close to the start of the chromosome.
+        tss_annotation = pl.concat(
+            [
+                tss_annotation,
+                tss_annotation.head(3),
+                pl.DataFrame(
+                    {"Chromosome": ["chr1"], "TSS_start": [5], "Strand": ["-"]},
+                    schema=tss_annotation.schema,
+                ),
+            ]
+        )
+        fragments = pl.concat(
+            [
+                fragments,
+                pl.DataFrame(
+                    {
+                        "Chromosome": pl.Series(["chr1"], dtype=fragments["Chromosome"].dtype),
+                        "Start": pl.Series([0], dtype=pl.Int32),
+                        "End": pl.Series([60], dtype=pl.Int32),
+                        "CB": pl.Series(["good0"], dtype=fragments["CB"].dtype),
+                        "CB_count": pl.Series([1], dtype=pl.Int32),
+                    }
+                ),
+            ]
+        )
+        kwargs = {
+            "flank_window": flank_window,
+            "smoothing_rolling_window": smoothing_rolling_window,
+            "minimum_signal_window": minimum_signal_window,
+            "tss_window": tss_window,
+            "min_norm": min_norm,
+        }
+        expected_enrichment, expected_sample, expected_per_cb = reference_tss_profile(
+            fragments, tss_annotation, **kwargs
+        )
+        cbs = expected_per_cb.columns[1:]
+        enrichment, sample, per_cb = get_tss_profile(
+            fragments,
+            tss_annotation,
+            tss_norm_matrix_per_cb_cbs=pl.Series(cbs),
+            no_threads=3,
+            **kwargs,
+        )
+
+        expected_enrichment = expected_enrichment.sort("CB")
+        enrichment = enrichment.sort("CB")
+        assert enrichment["CB"].cast(pl.Utf8).equals(expected_enrichment["CB"].cast(pl.Utf8))
+        np.testing.assert_allclose(
+            enrichment["tss_enrichment"], expected_enrichment["tss_enrichment"], rtol=1e-12
+        )
+        assert sample["position_from_tss"].equals(expected_sample["position_from_tss"])
+        np.testing.assert_allclose(
+            sample["normalized_tss_enrichment"],
+            expected_sample["normalized_tss_enrichment"],
+            rtol=1e-12,
+        )
+        assert per_cb.columns == expected_per_cb.columns
+        np.testing.assert_allclose(
+            per_cb.to_numpy(), expected_per_cb.to_numpy(), rtol=1e-12, atol=1e-12
+        )
+
+    def test_string_columns(self, fragments, tss_annotation):
+        # Chromosome and CB columns as strings instead of categoricals.
+        expected = get_tss_profile(fragments, tss_annotation, flank_window=1000)
+        result = get_tss_profile(
+            fragments.with_columns(pl.col("Chromosome", "CB").cast(pl.Utf8)),
+            tss_annotation,
+            flank_window=1000,
+        )
+        assert result[0].sort("CB").equals(expected[0].sort("CB"))
+        assert result[1].equals(expected[1])
 
     def test_no_overlap(self, fragments):
         tss = pl.DataFrame({"Chromosome": ["chrZ"], "TSS_start": [100], "Strand": ["+"]})
@@ -127,9 +219,30 @@ def test_compute_kde_matches_scipy():
     )
 
 
-def test_compute_kde_constant_second_dimension():
+def test_compute_kde_binned_approximates_scipy():
+    rng = np.random.default_rng(2)
+    # Correlated, skewed data on different scales (like QC statistics).
+    x = rng.gamma(2.0, 1.0, size=20_000)
+    training = np.vstack([x, 10 * x + rng.normal(0, 5, size=x.shape[0])])
+    test = training[:, :500]
+    expected = gaussian_kde(training)(test)
+    result = compute_kde(training, test, method="binned")
+    not_negligible = expected > 1e-3 * expected.max()
+    np.testing.assert_allclose(
+        result[not_negligible], expected[not_negligible], rtol=1e-2
+    )
+    assert np.abs(result - expected).max() < 1e-2 * expected.max()
+
+
+@pytest.mark.parametrize("method", ["exact", "binned"])
+def test_compute_kde_constant_second_dimension(method):
     training = np.vstack([np.arange(10.0), np.zeros(10)])
-    assert np.all(np.isfinite(compute_kde(training, training, no_threads=2)))
+    # The constant dimension is ignored.
+    np.testing.assert_allclose(
+        compute_kde(training, training, method=method),
+        gaussian_kde(training[0])(training[0]),
+        rtol=1e-2 if method == "binned" else 1e-12,
+    )
 
 
 @pytest.fixture(scope="module")
@@ -161,37 +274,8 @@ class TestComputeQcStats:
         assert stats["fraction_of_fragments_in_peaks"].is_between(0, 1).all()
         assert stats["pdf_values_for_tss_enrichment"].is_finite().all()
         assert insert_sizes["fragments_count"].sum() == fragments.height
-        assert tss_sample.height == tss_per_cb.height == 2001
-
-    def test_ruranges_engine(self, qc_stats, fragments, peaks, tss_annotation):
-        pytest.importorskip("ruranges")
-        result = compute_qc_stats(
-            fragments_df_pl=fragments,
-            regions_df_pl=peaks,
-            tss_annotation=tss_annotation,
-            tss_flank_window=1000,
-            min_fragments_per_cb=10,
-            no_threads=2,
-            intersection_engine="ruranges",
-        )
-        stats, insert_sizes, tss_sample, tss_per_cb = result
-        # KDE values (pdf_values_*) depend on the row order through float rounding.
-        # The duplication ratio is constant in the test data (degenerate KDE).
-        expected_stats = qc_stats[0].sort("CB").drop("pdf_values_for_duplication_ratio")
-        stats = stats.sort("CB").drop("pdf_values_for_duplication_ratio")
-        for column in expected_stats.columns:
-            if column.startswith("pdf_values_for_"):
-                np.testing.assert_allclose(stats[column], expected_stats[column], rtol=1e-6)
-            else:
-                assert stats[column].equals(expected_stats[column]), column
-        assert insert_sizes.equals(qc_stats[1])
-        for expected_df, result_df in ((qc_stats[2], tss_sample), (qc_stats[3], tss_per_cb)):
-            result_df = result_df.select(expected_df.columns).sort("position_from_tss")
-            np.testing.assert_allclose(
-                result_df.to_numpy(),
-                expected_df.sort("position_from_tss").to_numpy(),
-                rtol=1e-12,
-            )
+        assert tss_sample.height == 2001
+        assert tss_per_cb is None
 
     def test_good_cells_score_higher(self, qc_stats):
         stats = qc_stats[0].with_columns(

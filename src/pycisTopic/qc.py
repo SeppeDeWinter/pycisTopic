@@ -173,28 +173,132 @@ def get_barcodes_passing_qc_for_sample(
     }
 
 
+def _compute_kde_binned(
+    training_data: npt.NDArray[np.float64],
+    test_data: npt.NDArray[np.float64],
+    grid_spacing: float = 0.1,
+    max_grid_points: int = 4_000_000,
+) -> npt.NDArray[np.float64]:
+    """
+    Compute kernel-density estimate (KDE) using Gaussian kernels on a grid.
+
+    Approximates ``gaussian_kde(training_data)(test_data)`` (Scott's rule bandwidth):
+    the data is whitened with the kernel covariance (so the kernel becomes a standard
+    normal distribution), training data is linearly binned on a grid with
+    ``grid_spacing`` (in kernel standard deviations), smoothed with a Gaussian filter
+    and the PDF is linearly interpolated at the test data points.
+
+    """
+    from scipy.linalg import cholesky, solve_triangular
+    from scipy.ndimage import gaussian_filter, map_coordinates
+
+    n_dims, n_training = training_data.shape
+
+    # Kernel covariance as in scipy.stats.gaussian_kde (Scott's rule).
+    factor = n_training ** (-1.0 / (n_dims + 4))
+    kernel_cov = np.atleast_2d(np.cov(training_data)) * factor**2
+    cholesky_lower = cholesky(kernel_cov, lower=True)
+
+    # Whiten data: kernel becomes a standard normal distribution.
+    training_z = solve_triangular(cholesky_lower, training_data, lower=True)
+    test_z = solve_triangular(cholesky_lower, test_data, lower=True)
+
+    # Grid covering the training data and the kernel tails.
+    padding = 5.0
+    grid_min = training_z.min(axis=1) - padding
+    grid_max = training_z.max(axis=1) + padding
+    spacing = max(
+        grid_spacing,
+        (np.prod(grid_max - grid_min) / max_grid_points) ** (1.0 / n_dims),
+    )
+    grid_shape = tuple(np.ceil((grid_max - grid_min) / spacing).astype(int) + 2)
+
+    # Linear binning of the training data (each point is distributed over the
+    # 2 ** n_dims surrounding grid points).
+    training_grid_coord = (training_z - grid_min[:, None]) / spacing
+    lower_idx = np.floor(training_grid_coord).astype(np.int64)
+    fraction = training_grid_coord - lower_idx
+    grid = np.zeros(int(np.prod(grid_shape)), dtype=np.float64)
+    for corner in np.ndindex(*(2,) * n_dims):
+        corner_arr = np.array(corner)[:, None]
+        weights = np.prod(np.where(corner_arr == 1, fraction, 1.0 - fraction), axis=0)
+        flat_idx = np.ravel_multi_index(tuple(lower_idx + corner_arr), grid_shape)
+        grid += np.bincount(flat_idx, weights=weights, minlength=grid.shape[0])
+    grid = grid.reshape(grid_shape)
+
+    # Sum of kernels at each grid point (normalized discrete Gaussian filter).
+    grid = gaussian_filter(grid, sigma=1.0 / spacing, mode="constant", truncate=5.0)
+
+    # Interpolate at test data points (0 outside the grid).
+    smoothed_at_test = map_coordinates(
+        grid,
+        (test_z - grid_min[:, None]) / spacing,
+        order=1,
+        mode="constant",
+        cval=0.0,
+    )
+
+    # The normalized discrete filter gives the sum of the kernels times
+    # spacing ** n_dims / (2 * pi) ** (n_dims / 2).
+    return np.maximum(smoothed_at_test, 0.0) / (
+        spacing**n_dims * n_training * np.prod(np.diag(cholesky_lower))
+    )
+
+
+def _compute_kde_exact(
+    training_data: npt.NDArray[np.float64],
+    test_data: npt.NDArray[np.float64],
+    no_threads: int = 8,
+) -> npt.NDArray[np.float64]:
+    """Compute ``gaussian_kde(training_data)(test_data)`` in parallel."""
+    # Only calculate the KDE for unique test data points.
+    test_data_unique, test_data_original_order_idx = np.unique(
+        test_data, axis=1, return_inverse=True
+    )
+    test_data_unique_split_arrays = np.array_split(
+        test_data_unique, max(1, no_threads), axis=1
+    )
+
+    kde = gaussian_kde(training_data)
+
+    with ThreadPoolExecutor(max(1, no_threads)) as executor:
+        pdf_results = list(executor.map(kde, test_data_unique_split_arrays))
+
+    return np.concatenate(pdf_results)[test_data_original_order_idx.ravel()]
+
+
 def compute_kde(
     training_data: npt.ArrayLike,
     test_data: npt.ArrayLike,
     no_threads: int = 8,
+    method: Literal["auto", "exact", "binned"] = "auto",
 ) -> npt.NDArray[np.float64]:
     """
     Compute kernel-density estimate (KDE) using Gaussian kernels.
 
-    This function calculates the KDE in parallel and gives the same result as:
+    The exact method gives the same result as:
 
     >>> from scipy.stats import gaussian_kde
     >>> gaussian_kde(training_data)(test_data)
 
+    but its run time grows with the product of the number of training and test data
+    points. The binned method approximates it on a grid (relative error < 1% where
+    the density is not negligible) and is fast for any number of data points.
+
+    Dimensions in which all training data points have the same value are ignored.
+
     Parameters
     ----------
     training_data
-        2D numpy array with training data to train the KDE.
+        2D numpy array with training data to train the KDE (dimensions x points).
     test_data
         2D numpy array with test data for which to evaluate the estimated probability
-        density function (PDF).
+        density function (PDF) (dimensions x points).
     no_threads
-        Number of threads to use in parallelization of KDE function.
+        Number of threads to use for the exact method.
+    method
+        ``"exact"``, ``"binned"`` or ``"auto"`` (exact for small data:
+        number of training x test data points <= 1e8).
 
     Returns
     -------
@@ -202,82 +306,30 @@ def compute_kde(
     test_data.
 
     """
-    training_data = np.asarray(training_data, dtype=np.float64)
-    test_data = np.asarray(test_data, dtype=np.float64)
+    training_data = np.atleast_2d(np.asarray(training_data, dtype=np.float64))
+    test_data = np.atleast_2d(np.asarray(test_data, dtype=np.float64))
 
-    # Avoid very rare cases where second column of training_data has the same
-    # value everywhere. This can happen in some cases for duplication ratio as
-    # it can be 0.0% when fragment counts for each fragment are 1.
-    #
-    # This will result in the following error:
-    #     LinAlgError: The data appears to lie in a lower-dimensional subspace of
-    #     the space in which it is expressed. This has resulted in a singular data
-    #     covariance matrix, which cannot be treated using the algorithms implemented
-    #     in `gaussian_kde`. Consider performing principle component analysis /
-    #     dimensionality reduction and using `gaussian_kde` with the transformed data.
-    if np.var(training_data[1]) == 0.0:
-        # Add small value to first element to avoid all of them to be equal.
-        if training_data[1][0] == 0.0:
-            training_data[1][0] = 0.000000000001
-        else:
-            # In even rarer case that the value is not 0.0, change the value proportionally.
-            training_data[1][0] = training_data[1][0] * 1.000000000001
+    # Ignore dimensions with the same value for all training data points (e.g.
+    # duplication ratio of 0.0 for all cell barcodes when each fragment count is 1),
+    # for which the covariance matrix would be singular.
+    varying_dims = np.var(training_data, axis=1) > 0.0
+    if not np.any(varying_dims):
+        return np.ones(test_data.shape[1], dtype=np.float64)
+    training_data = training_data[varying_dims]
+    test_data = test_data[varying_dims]
 
-    # Convert 2D numpy array test data to complex number array so numpy considers both
-    # columns at the same time in further operations.
-    test_data_all = np.empty(test_data.shape[1], dtype=np.complex128)
-    test_data_all.real = test_data[0]
-    test_data_all.imag = test_data[1]
+    if method == "auto":
+        method = (
+            "exact"
+            if training_data.shape[1] * test_data.shape[1] <= 100_000_000
+            else "binned"
+        )
 
-    # Get unique values for test data considering whole rows of the original test_data.
-    # The KDE calculation only needs to be done for unique values in the test data.
-    test_data_unique = np.unique(test_data_all)
-
-    # Get index position locations in test_data_unique for each value in test_data_all.
-    test_data_original_order_idx = np.searchsorted(test_data_unique, test_data_all)
-
-    # Split the array of unique test data values in one array for each thread.
-    test_data_unique_split_arrays = np.array_split(
-        np.vstack([test_data_unique.real, test_data_unique.imag]),
-        no_threads,
-        axis=1,
-    )
-
-    def compute_kde_part(
-        test_data_unique_split_array: npt.NDArray[np.float64],
-    ) -> npt.NDArray[np.float64]:
-        """
-        Compute kernel-density estimate (KDE) using Gaussian kernels for a subsection of the test_data.
-
-        Parameters
-        ----------
-        test_data_unique_split_array
-            2D numpy array with a part of the test data for which to evaluate the
-            estimated probability density function (PDF).
-
-        Returns
-        -------
-        1D numpy array with probability density function (PDF) values for points in
-        test_data.
-
-        """
-        return gaussian_kde(training_data)(test_data_unique_split_array)
-
-    pdf_results = []
-
-    # Calculate KDE for each subsection of the test dataStart the thread pool.
-    with ThreadPoolExecutor(no_threads) as executor:
-        # Execute tasks concurrently and process results in order.
-        for pdf_result in executor.map(compute_kde_part, test_data_unique_split_arrays):
-            # Store partial PDF result.
-            pdf_results.append(pdf_result)
-
-    # Get PDF values from the partial PDF results calculated on unique values in the
-    # test data and construct a full PDF values array that matches the order of the
-    # original test data.
-    pdf_values = np.concatenate(pdf_results)[test_data_original_order_idx]
-
-    return pdf_values
+    if method == "exact":
+        return _compute_kde_exact(training_data, test_data, no_threads=no_threads)
+    if method == "binned":
+        return _compute_kde_binned(training_data, test_data)
+    raise ValueError(f'Invalid method "{method}": use "auto", "exact" or "binned".')
 
 
 def get_otsu_threshold(
@@ -376,8 +428,8 @@ def compute_qc_stats(
     min_fragments_per_cb: int = 10,
     collapse_duplicates: bool = True,
     no_threads: int = 8,
-    intersection_engine: str | Literal["ncls", "ruranges"] = "ncls",
-) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+    tss_norm_matrix_per_cb: bool = False,
+) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame | None]:
     """
     Compute quality check statistics from Polars DataFrame with fragments.
 
@@ -437,14 +489,13 @@ def compute_qc_stats(
         Collapse duplicate fragments (same chromosomal positions and linked to the same
         cell barcode).
     no_threads
-        Number of threads to use when calculating kernel-density estimate (KDE) to get
-        probability density function (PDF) values for log10 unique fragments in peaks
-        vs TSS enrichment, fractions of fragments in peaks and duplication ratio.
+        Number of threads to use to calculate the TSS profile and the kernel-density
+        estimates (KDE).
         Default: ``8``.
-    intersection_engine
-        Engine to use to calculate intersections/overlaps between fragments and regions.
-        Options: ``ncls`` or ``ruranges`` (faster).
-        Default: ``ncls``.
+    tss_norm_matrix_per_cb
+        Calculate the normalized TSS profile per cell barcode (for cell barcodes with
+        more than ``min_fragments_per_cb`` fragments). This matrix is large.
+        Default: ``False``.
 
     Returns
     -------
@@ -452,7 +503,8 @@ def compute_qc_stats(
       - Polars DataFrame with fragments statistics per cell barcode.
       - Polars DataFrame with insert size distribution of fragments.
       - Polars DataFrame with TSS normalization matrix for the whole sample.
-      - Polars DataFrame with TSS normalization matrix per cell barcode.
+      - Polars DataFrame with TSS normalization matrix per cell barcode (``None`` if
+        ``tss_norm_matrix_per_cb`` is ``False``).
 
     See Also
     --------
@@ -511,7 +563,6 @@ def compute_qc_stats(
     ...     min_fragments_per_cb=10,
     ...     collapse_duplicates=True,
     ...     no_threads=8,
-    ...     intersection_engine="ncls",
     ... )
 
     """
@@ -553,6 +604,7 @@ def compute_qc_stats(
             fragments_in_peaks_df_pl.lazy(),
             how="left",
             on="CB",
+            maintain_order="left",
         )
         .with_columns(
             pl.col("total_fragments_in_peaks_count").fill_null(0),
@@ -597,10 +649,11 @@ def compute_qc_stats(
 
     # Get TSS profile for fragments.
     logger.info("Get TSS profile for fragments.")
+    fragments_stats_per_cb_df_pl = fragments_stats_per_cb_df_pl.collect()
     (
         tss_enrichment_per_cb,
         tss_norm_matrix_sample,
-        tss_norm_matrix_per_cb,
+        tss_norm_matrix_per_cb_df_pl,
     ) = get_tss_profile(
         fragments_df_pl=fragments_df_pl,
         tss_annotation=tss_annotation,
@@ -609,16 +662,23 @@ def compute_qc_stats(
         minimum_signal_window=tss_minimum_signal_window,
         tss_window=tss_window,
         min_norm=tss_min_norm,
-        intersection_engine=intersection_engine,
+        tss_norm_matrix_per_cb_cbs=(
+            fragments_stats_per_cb_df_pl.get_column("CB")
+            if tss_norm_matrix_per_cb
+            else None
+        ),
+        no_threads=no_threads,
     )
 
     # Add TSS enrichment to fragments statistics per cell barcode.
     logger.info("Add TSS enrichment to fragments statistics per cell barcode.")
     fragments_stats_per_cb_df_pl = (
-        fragments_stats_per_cb_df_pl.join(
+        fragments_stats_per_cb_df_pl.lazy()
+        .join(
             tss_enrichment_per_cb.lazy(),
             how="left",
             on="CB",
+            maintain_order="left",
         )
         .with_columns(
             pl.col("tss_enrichment").fill_null(0.0),
@@ -703,5 +763,5 @@ def compute_qc_stats(
         fragments_stats_per_cb_df_pl,
         insert_size_dist_df_pl,
         tss_norm_matrix_sample,
-        tss_norm_matrix_per_cb,
+        tss_norm_matrix_per_cb_df_pl,
     )

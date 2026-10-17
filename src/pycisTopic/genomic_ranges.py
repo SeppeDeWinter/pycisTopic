@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal, overload
 
+import numba
 import numpy as np
 import polars as pl
+
+from pycisTopic.categoricals import PycisTopicCategoricals
 
 if TYPE_CHECKING:
     import numpy.typing as npt
@@ -1582,3 +1585,106 @@ def nearest(
         )
 
     return pl.concat(nearest_chrom_dfs_pl).sort("_row_idx").drop("_row_idx")
+
+
+@numba.njit(parallel=True, cache=True)
+def _overlaps_any_sorted_disjoint(
+    chrom_codes1: npt.NDArray[np.uint32],
+    starts1: npt.NDArray[np.integer],
+    ends1: npt.NDArray[np.integer],
+    starts2: npt.NDArray[np.int64],
+    ends2: npt.NDArray[np.int64],
+) -> npt.NDArray[np.bool_]:
+    """
+    Check if intervals overlap with any of the sorted, disjoint intervals 2.
+
+    Positions of intervals 2 are encoded as `chromosome_code << 32 | position`.
+
+    """
+    result = np.zeros(starts1.shape[0], dtype=np.bool_)
+    for i in numba.prange(starts1.shape[0]):
+        chrom_offset = np.int64(chrom_codes1[i]) << 32
+        # Last interval 2 which starts before the end of interval 1.
+        j = np.searchsorted(starts2, chrom_offset + np.int64(ends1[i])) - 1
+        result[i] = j >= 0 and ends2[j] > chrom_offset + np.int64(starts1[i])
+    return result
+
+
+def overlaps_any(
+    regions1_df_pl: pl.DataFrame,
+    regions2_df_pl: pl.DataFrame,
+) -> npt.NDArray[np.bool_]:
+    """
+    Check for each region of the first set if it overlaps with any region of the second set.
+
+    Faster than :func:`overlap` when only the presence of an overlap is needed, for
+    example for hundreds of millions of fragments.
+
+    Parameters
+    ----------
+    regions1_df_pl
+        Polars DataFrame containing BED entries for first set of regions
+        (``Chromosome``, ``Start`` and ``End`` columns).
+    regions2_df_pl
+        Polars DataFrame containing BED entries for second set of regions
+        (``Chromosome``, ``Start`` and ``End`` columns).
+
+    Returns
+    -------
+    Boolean numpy array with the same length as ``regions1_df_pl``.
+
+    Examples
+    --------
+    >>> regions1_df_pl = pl.DataFrame(
+    ...     {
+    ...         "Chromosome": ["chr1", "chr1", "chr2"],
+    ...         "Start": [1, 10, 1],
+    ...         "End": [5, 20, 5],
+    ...     }
+    ... )
+    >>> regions2_df_pl = pl.DataFrame(
+    ...     {"Chromosome": ["chr1", "chr1"], "Start": [4, 20], "End": [8, 30]}
+    ... )
+    >>> overlaps_any(regions1_df_pl, regions2_df_pl)
+    array([ True, False, False])
+
+    """
+    # Use the same chromosome codes for both sets of regions: categorical codes are
+    # only consistent while the categories are in use, so keep both casted chromosome
+    # columns alive at the same time.
+    chrom_dtype = pl.Categorical(PycisTopicCategoricals.CHROMOSOME)
+    chroms1 = regions1_df_pl.get_column("Chromosome").cast(chrom_dtype)
+    chroms2 = regions2_df_pl.get_column("Chromosome").cast(chrom_dtype)
+
+    def _encoded_positions(df: pl.DataFrame, chroms: pl.Series) -> pl.DataFrame:
+        # Encode positions as `chromosome_code << 32 | position`, so intervals on all
+        # chromosomes can be searched at once in one sorted array (intervals on
+        # different chromosomes never overlap).
+        chrom = pl.lit(chroms.to_physical().cast(pl.Int64)) * 2**32
+        return df.select(
+            (chrom + pl.col("Start").cast(pl.Int64)).alias("Start"),
+            (chrom + pl.col("End").cast(pl.Int64)).alias("End"),
+        )
+
+    # Merge overlapping regions of the second set to get sorted, disjoint intervals.
+    regions2_merged_df_pl = (
+        _encoded_positions(regions2_df_pl, chroms2)
+        .filter(pl.col("End") > pl.col("Start"))
+        .sort("Start")
+        .with_columns(
+            (pl.col("Start") > pl.col("End").cum_max().shift(1))
+            .fill_null(True)
+            .cum_sum()
+            .alias("merged_id")
+        )
+        .group_by("merged_id", maintain_order=True)
+        .agg(pl.col("Start").first(), pl.col("End").max())
+    )
+
+    return _overlaps_any_sorted_disjoint(
+        chroms1.to_physical().to_numpy(),
+        regions1_df_pl.get_column("Start").to_numpy(),
+        regions1_df_pl.get_column("End").to_numpy(),
+        regions2_merged_df_pl.get_column("Start").to_numpy(),
+        regions2_merged_df_pl.get_column("End").to_numpy(),
+    )

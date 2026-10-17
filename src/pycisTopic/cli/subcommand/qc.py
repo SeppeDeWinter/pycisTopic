@@ -25,7 +25,7 @@ def qc(
     no_threads: int = 8,
     bed_parser_engine: str
     | Literal["polars_lazy", "polars", "pyarrow"] = "polars_lazy",
-    intersection_engine: str | Literal["ncls", "ruranges"] = "ncls",
+    tss_norm_matrix_per_cb: bool = False,
 ) -> None:
     """
     Compute quality check statistics from fragments file.
@@ -91,10 +91,10 @@ def qc(
           - ``polars`` (slightly slower, highest memory usage): Use Polars eager API (``pl.read_csv``).
           - ``pyarrow`` (slowest, high memory usage): Use pyarrow CSV reader (``pa.csv.read_csv``).
         Default: ``polars_lazy``.
-    intersection_engine
-        Engine to use to calculate intersections/overlaps between fragments and regions.
-        Options: ``ncls`` or ``ruranges`` (faster).
-        Default: ``ncls``.
+    tss_norm_matrix_per_cb
+        Write the normalized TSS profile per cell barcode
+        (``OUTPUT_PREFIX.tss_norm_matrix_per_cb.parquet``). This file is large.
+        Default: ``False``.
 
     Returns
     -------
@@ -156,7 +156,7 @@ def qc(
         fragments_stats_per_cb_df_pl,
         insert_size_dist_df_pl,
         tss_norm_matrix_sample,
-        tss_norm_matrix_per_cb,
+        tss_norm_matrix_per_cb_df_pl,
     ) = compute_qc_stats(
         fragments_df_pl=fragments_df_pl,
         regions_df_pl=regions_df_pl,
@@ -169,7 +169,7 @@ def qc(
         min_fragments_per_cb=min_fragments_per_cb,
         collapse_duplicates=collapse_duplicates,
         no_threads=no_threads,
-        intersection_engine=intersection_engine,
+        tss_norm_matrix_per_cb=tss_norm_matrix_per_cb,
     )
 
     logger.info(f'Writing "{output_prefix}.fragments_stats_per_cb.parquet".')
@@ -193,12 +193,12 @@ def qc(
         use_pyarrow=True,
     )
 
-    logger.info(f'Writing "{output_prefix}.tss_norm_matrix_per_cb.parquet".')
-    tss_norm_matrix_per_cb.write_parquet(
-        f"{output_prefix}.tss_norm_matrix_per_cb.parquet",
-        compression="zstd",
-        use_pyarrow=True,
-    )
+    if tss_norm_matrix_per_cb_df_pl is not None:
+        logger.info(f'Writing "{output_prefix}.tss_norm_matrix_per_cb.parquet".')
+        tss_norm_matrix_per_cb_df_pl.write_parquet(
+            f"{output_prefix}.tss_norm_matrix_per_cb.parquet",
+            compression="zstd",
+        )
 
     logger.info("Calculating Otsu thresholds.")
     (
@@ -345,7 +345,7 @@ def run_qc_run(args):
         collapse_duplicates=args.collapse_duplicates,
         no_threads=args.threads,
         bed_parser_engine=args.bed_parser_engine,
-        intersection_engine=args.intersection_engine,
+        tss_norm_matrix_per_cb=args.tss_norm_matrix_per_cb,
     )
 
 
@@ -540,17 +540,12 @@ def add_parser_qc(subparsers: _SubParsersAction[ArgumentParser]):
     )
 
     group_qc_run_tss.add_argument(
-        "--intersection_engine",
-        dest="intersection_engine",
-        action="store",
-        type=str,
-        choices=["ncls", "ruranges"],
-        required=False,
-        default="ncls",
+        "--tss_per_cb",
+        dest="tss_norm_matrix_per_cb",
+        action="store_true",
         help="""
-            Engine to use to calculate intersections/overlaps between fragments and regions.
-            Options: "ncls" or "ruranges" (faster, requires "pip install pycisTopic[ruranges]").
-            Default: "ncls".
+            Write the normalized TSS profile per cell barcode
+            ("OUTPUT_PREFIX.tss_norm_matrix_per_cb.parquet"). This file is large.
             """,
     )
 

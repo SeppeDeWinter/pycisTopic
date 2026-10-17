@@ -11,6 +11,7 @@ import scipy as sp
 from pycisTopic.categoricals import PycisTopicCategoricals
 from pycisTopic.genomic_ranges import intersection as gr_intersection
 from pycisTopic.genomic_ranges import overlap as gr_overlap
+from pycisTopic.genomic_ranges import overlaps_any
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -1012,7 +1013,6 @@ def get_insert_size_distribution(
 def get_fragments_in_peaks(
     fragments_df_pl: pl.DataFrame,
     regions_df_pl: pl.DataFrame,
-    intersection_engine: str | Literal["ncls", "ruranges"] = "ncls",
 ) -> pl.DataFrame:
     """
     Get number of total and unique fragments in peaks.
@@ -1024,11 +1024,7 @@ def get_fragments_in_peaks(
     regions_df_pl
         Polars DataFrame with peak regions (consensus peaks or SCREEN regions).
         See :func:`pycisTopic.fragments.read_bed_to_polars_df` for a way to read a BED
-        file with peak regsions.
-    intersection_engine
-        Engine to use to calculate intersections/overlaps between fragments and regions.
-        Options: ``ncls`` or ``ruranges`` (faster).
-        Default: ``ncls``.
+        file with peak regions.
 
     Returns
     -------
@@ -1060,42 +1056,38 @@ def get_fragments_in_peaks(
     >>> fragments_in_peaks_df_pl = get_fragments_in_peaks(
     ...     fragments_df_pl=fragments_cb_filtered_df_pl,
     ...     regions_df_pl=regions_df_pl,
-    ...     intersection_engine="ncls",
     ... )
 
     """
     fragments_in_peaks_df_pl = (
-        # Get all fragments that overlap with at least one region.
-        gr_intersection(
-            regions1_df_pl=fragments_df_pl,
-            regions2_df_pl=regions_df_pl,
-            how="first",
-            regions1_info=True,
-            regions2_info=False,
-            regions1_coord=True,
-            regions2_coord=False,
-            regions1_suffix="@1",
-            regions2_suffix="@2",
-            engine=intersection_engine,
-        )
-        # Get all fragment file related columns.
+        fragments_df_pl.lazy()
         .select(
-            pl.col("Chromosome"),
-            pl.col("Start@1").alias("Start"),
-            pl.col("End@1").alias("End"),
             pl.col("CB"),
             pl.col("CB_count"),
+            # Fragments that overlap with at least one region.
+            pl.lit(
+                pl.Series(
+                    overlaps_any(fragments_df_pl, regions_df_pl), dtype=pl.Boolean
+                )
+            ).alias("in_peaks"),
         )
         .group_by("CB", maintain_order=True)
         .agg(
             [
                 pl.col("CB_count")
+                .filter(pl.col("in_peaks"))
                 .sum()
                 .cast(pl.UInt32)
                 .alias("total_fragments_in_peaks_count"),
-                pl.len().cast(pl.UInt32).alias("unique_fragments_in_peaks_count"),
+                pl.col("in_peaks")
+                .sum()
+                .cast(pl.UInt32)
+                .alias("unique_fragments_in_peaks_count"),
             ]
         )
+        # Only keep CBs with fragments in peaks.
+        .filter(pl.col("unique_fragments_in_peaks_count") > 0)
+        .collect()
     )
 
     return fragments_in_peaks_df_pl

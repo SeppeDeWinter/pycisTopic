@@ -4,7 +4,13 @@ import numpy as np
 import polars as pl
 import pytest
 
-from pycisTopic.genomic_ranges import extend, intersection, nearest, overlap
+from pycisTopic.genomic_ranges import (
+    extend,
+    intersection,
+    nearest,
+    overlap,
+    overlaps_any,
+)
 
 
 def _random_regions(rng, n, chroms=("chr1", "chr2"), max_pos=5000, max_len=300):
@@ -266,3 +272,23 @@ def test_ruranges_engine_matches_ncls(how):
     assert _sorted(overlap(df1, df2, how=how, engine="ruranges")).equals(
         _sorted(overlap(df1, df2, how=how, engine="ncls"))
     )
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_overlaps_any_matches_brute_force(seed):
+    rng = np.random.default_rng(seed)
+    df1 = _random_regions(rng, 300, chroms=("chr1", "chr2", "chr3"))
+    # Overlapping, touching and nested regions in the second set.
+    df2 = _random_regions(rng, 100, chroms=("chr2", "chr1", "chr4"))
+    df2 = pl.concat(
+        [df2, df2.head(20).with_columns(pl.col("End").alias("Start"), (pl.col("End") + 7).alias("End"))]
+    )
+    overlapping = {i for i, _ in _brute_force_overlapping_pairs(df1, df2)}
+    expected = np.array([i in overlapping for i in range(df1.height)])
+    np.testing.assert_array_equal(overlaps_any(df1, df2), expected)
+
+
+def test_overlaps_any_empty():
+    df = pl.DataFrame({"Chromosome": ["chr1"], "Start": [0], "End": [10]})
+    assert overlaps_any(df, df.clear()).tolist() == [False]
+    assert overlaps_any(df.clear(), df).tolist() == []
