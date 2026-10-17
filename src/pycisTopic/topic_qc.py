@@ -114,7 +114,7 @@ def plot_topic_qc(
         Path to save plots as a file. Default: None.
     return_topics
         Whether to return selected topics based on user-given thresholds.
-        Default: True.
+        Default: False.
     return_fig
         Whether to return the plot figure; if several samples it will return a
         dictionary with the figures per sample. Default: False.
@@ -124,7 +124,6 @@ def plot_topic_qc(
     A list with the selected topics.
 
     """
-    import matplotlib.cm as cm
     import matplotlib.patheffects as PathEffects
     import matplotlib.pyplot as plt
     from adjustText import adjust_text
@@ -132,7 +131,7 @@ def plot_topic_qc(
     # Plot xy.
     fig = plt.figure()
     if var_color is not None:
-        plt.scatter(
+        scatter = plt.scatter(
             topic_qc_metrics[var_x],
             topic_qc_metrics[var_y],
             c=topic_qc_metrics[var_color],
@@ -152,8 +151,8 @@ def plot_topic_qc(
     for i, _txt in enumerate(n):
         texts.append(
             plt.text(
-                topic_qc_metrics[var_x][i],
-                topic_qc_metrics[var_y][i],
+                topic_qc_metrics[var_x].iloc[i],
+                topic_qc_metrics[var_y].iloc[i],
                 i + 1,
                 horizontalalignment="center",
                 verticalalignment="center",
@@ -190,9 +189,7 @@ def plot_topic_qc(
 
     # Setup the colorbar.
     if var_color is not None:
-        scalarmappaple = cm.ScalarMappable(cmap=cmap)
-        scalarmappaple.set_array(topic_qc_metrics[var_color])
-        cbar = plt.colorbar(scalarmappaple)
+        cbar = plt.colorbar(scatter)
         cbar.set_label(var_color, rotation=270, labelpad=15)
 
     plt.tight_layout()

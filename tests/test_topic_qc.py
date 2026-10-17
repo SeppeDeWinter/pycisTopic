@@ -105,3 +105,35 @@ class TestTopicQcOnAnnData:
         assert annotation["group"].tolist() == ["A", "", "A, C"]
         assert annotation["is_general"].tolist() == [False, True, False]
         assert annotation.loc["Topic3", "Ratio_cells_in_topic"] == pytest.approx(250 / 300)
+
+
+def test_plot_topic_qc(tmp_path):
+    pytest.importorskip("matplotlib")
+    pytest.importorskip("adjustText")
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import pandas as pd
+
+    from pycisTopic.topic_qc import plot_topic_qc
+
+    topics = pd.DataFrame(
+        {
+            "Coherence": [-1.0, -0.5, -2.0],
+            "Log10_Assignments": [5.0, 6.0, 4.0],
+            "Gini_index": [0.2, 0.5, 0.8],
+        },
+        index=["Topic1", "Topic2", "Topic3"],
+    )
+    selected = plot_topic_qc(
+        topics,
+        var_x="Coherence",
+        var_y="Log10_Assignments",
+        min_x=-1.5,
+        var_color="Gini_index",
+        plot=False,
+        save=str(tmp_path / "topic_qc.png"),
+        return_topics=True,
+    )
+    assert selected == ["Topic1", "Topic2"]
+    assert (tmp_path / "topic_qc.png").exists()
