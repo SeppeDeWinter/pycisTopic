@@ -41,7 +41,7 @@ def run_topic_qc(args):
         if missing:
             raise ValueError(
                 f"Topic QC metrics {missing} are not available (run `pycistopic "
-                "topic_modeling mallet stats` before `create_anndata`)."
+                "topic_modeling lda stats` (or `mallet stats`) before `create_anndata`)."
             )
         print(f'Writing topic QC plot to "{args.plot}".')
         plot_topic_qc(

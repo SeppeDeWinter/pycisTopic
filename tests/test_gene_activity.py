@@ -83,6 +83,27 @@ class TestRegionGeneWeights:
         assert set(weights["Gene_size_weight"]) == {1.0}
         assert "Distance_upstream" not in weights.columns
 
+    @pytest.mark.parametrize("use_gene_boundaries", [True, False])
+    def test_gene_with_copy_on_other_contig(
+        self, annotation, chrom_sizes, use_gene_boundaries
+    ):
+        # Copy of G1 on an alt contig (not in chrom_sizes) before the chr1 entry.
+        annotation = pl.concat(
+            [
+                annotation.head(1).with_columns(
+                    pl.lit("chr1_KI270706v1_random").alias("Chromosome")
+                ),
+                annotation,
+            ]
+        )
+        weights = get_region_gene_weights(
+            _regions((14_990, 15_010)),
+            annotation,
+            chrom_sizes,
+            use_gene_boundaries=use_gene_boundaries,
+        )
+        assert ("chr1:14990-15010", "G1") in _weights_by_link(weights)
+
     def test_gene_boundaries_limit_search_space(self, annotation, chrom_sizes):
         regions = _regions((21_990, 22_010), (35_000, 35_020), (60_000, 60_020))
         weights = get_region_gene_weights(regions, annotation, chrom_sizes)

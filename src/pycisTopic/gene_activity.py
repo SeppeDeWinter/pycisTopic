@@ -86,7 +86,7 @@ def get_region_gene_weights(
         ``TSS_start`` columns are used).
     chrom_sizes
         Polars DataFrame with ``Chromosome``, ``Start`` (0) and ``End`` (chromosome
-        size) columns.
+        size) columns. Genes on other chromosomes (e.g. alt contigs) are ignored.
     predefined_boundaries
         Polars DataFrame (``Chromosome``, ``Start``, ``End``) with predefined genomic
         domain boundaries (e.g. TAD boundaries) to use as boundaries. If given,
@@ -150,6 +150,15 @@ def get_region_gene_weights(
         pl.col("Gene").fill_null("na"),
         pl.col("TSS_start").cast(pl.Int64),
     ).with_columns((pl.col("End") - pl.col("Start")).abs().alias("Gene_width"))
+
+    # Only keep genes on chromosomes in chrom_sizes. Genes with copies on other
+    # contigs (e.g. alt contigs in hg38) would otherwise be lost when the copy on
+    # another contig is kept as the one entry per gene.
+    annot = annot.filter(
+        pl.col("Chromosome").is_in(
+            chrom_sizes.get_column("Chromosome").cast(pl.Utf8).implode()
+        )
+    )
 
     if gene_size_weight:
         if log is not None:
@@ -412,7 +421,7 @@ def get_gene_activity(
         :func:`pycisTopic.gene_annotation.get_tss_annotation_from_ensembl`.
     chrom_sizes
         Polars DataFrame with ``Chromosome``, ``Start`` (0) and ``End`` (chromosome
-        size) columns.
+        size) columns. Genes on other chromosomes (e.g. alt contigs) are ignored.
     predefined_boundaries
         See :func:`get_region_gene_weights`.
     use_gene_boundaries
