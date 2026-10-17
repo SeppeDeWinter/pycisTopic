@@ -189,6 +189,8 @@ def get_contrast_barcodes_lists(
         - If 'background' is empty, all cells NOT in the foreground are used.
         - If None, each unique annotation is compared against all other cells (1-vs-all).
 
+        Cells without annotation (null) are not used.
+
     Returns
     -------
     Dictionary with foreground and background cell barcode lists.
@@ -201,6 +203,9 @@ def get_contrast_barcodes_lists(
         if isinstance(cell_data_tsv, pl.DataFrame)
         else pl.read_csv(cell_data_tsv, separator="\t")
     )
+    # Compare annotations as strings (e.g. for numeric cluster labels). Cells without
+    # annotation (null) are never selected by the filters below.
+    df = df.with_columns(pl.col(annotation_column).cast(pl.Utf8))
 
     # Initialize contrast barcodes dictionary
     contrast_barcodes: dict[str, dict[str, list[str]]] = {}
@@ -249,7 +254,9 @@ def get_contrast_barcodes_lists(
                 )
     else:
         # 1-vs-all: each unique annotation in annotation_column against all other cells
-        unique_annotations = df[annotation_column].unique().to_list()
+        unique_annotations = (
+            df[annotation_column].drop_nulls().unique(maintain_order=True).to_list()
+        )
         for annotation in unique_annotations:
             contrast_name = f"fg_{annotation}_vs_bg_others"
             contrast_barcodes[contrast_name] = {
@@ -265,6 +272,7 @@ def get_contrast_barcodes_lists(
 def run_compute_dars(args):
     import anndata as ad
     import numpy as np
+    import pandas as pd
 
     from pycisTopic.adata import get_cell_topic, get_region_topic
     from pycisTopic.diff_features import (
@@ -323,7 +331,11 @@ def run_compute_dars(args):
         cell_data = pl.DataFrame(
             {
                 barcode_column: cell_names,
-                annotation_column: adata.obs[annotation_column].astype(str).tolist(),
+                # Missing annotations (NaN) become null.
+                annotation_column: [
+                    None if pd.isna(annotation) else str(annotation)
+                    for annotation in adata.obs[annotation_column]
+                ],
             }
         )
     else:
