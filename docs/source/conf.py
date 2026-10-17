@@ -20,12 +20,12 @@ import warnings
 import sphinx_autosummary_accessors
 
 # add polars directory
-sys.path.insert(0, os.path.abspath("../.."))
+sys.path.insert(0, os.path.abspath("../../src"))
 
 # -- Project information -----------------------------------------------------
 
 project = "pycisTopic"
-author = "Carmen Bravo González-Blas, Gert Hulselmans"
+author = "Carmen Bravo González-Blas, Gert Hulselmans, Seppe De Winter"
 copyright = f"{datetime.date.today().year}, {author}"
 
 
@@ -80,8 +80,7 @@ html_theme = "sphinx_rtd_theme"
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ["_static"]
-html_css_files = ["css/custom.css"]  # relative to html_static_path
+html_static_path: list[str] = []
 html_show_sourcelink = False
 
 # adds useful copy functionality to all the examples; also
@@ -92,46 +91,13 @@ copybutton_prompt_is_regexp = True
 autosummary_generate = True
 numpydoc_show_class_members = False
 
-html_theme_options = {
-    "external_links": [
-        {
-            "name": "User Guide",
-            "url": "https://pola-rs.github.io/polars-book/user-guide/index.html",
-        },
-        {"name": "Powered by Xomnia", "url": "https://www.xomnia.com/"},
-    ],
-    "icon_links": [
-        {
-            "name": "GitHub",
-            "url": "https://github.com/aertslab/pycisTopic",
-            "icon": "fa-brands fa-github",
-        },
-    ],
-    "logo": {
-        "image_light": "https://raw.githubusercontent.com/aertslab/scenicplus/development/docs/images/SCENIC%2B_Logo_v5_no_text.png",
-        "image_dark": "https://raw.githubusercontent.com/aertslab/scenicplus/development/docs/images/SCENIC%2B_Logo_v5_no_text.png",
-    },
-}
-
-favicons = [
-    {
-        "rel": "icon",
-        "sizes": "32x32",
-        "href": "https://raw.githubusercontent.com/pola-rs/polars-static/master/icons/favicon-32x32.png",
-    },
-    {
-        "rel": "apple-touch-icon",
-        "sizes": "180x180",
-        "href": "https://raw.githubusercontent.com/pola-rs/polars-static/master/icons/touchicon-180x180.png",
-    },
-]
-
 intersphinx_mapping = {
     "numpy": ("https://numpy.org/doc/stable/", None),
     "pandas": ("https://pandas.pydata.org/docs/", None),
     "polars": ("https://pola-rs.github.io/polars/py-polars/html/", None),
     "pyarrow": ("https://arrow.apache.org/docs/", None),
-    "pyranges": ("https://pyranges.readthedocs.io/en/latest/autoapi/", None),
+    "anndata": ("https://anndata.readthedocs.io/en/stable/", None),
+    "scanpy": ("https://scanpy.readthedocs.io/en/stable/", None),
     "python": ("https://docs.python.org/3", None),
 }
 
@@ -186,12 +152,12 @@ def linkcode_resolve(domain, info):
     linespec = f"#L{lineno}-L{lineno + len(source) - 1}" if lineno else ""
 
     conf_dir_path = os.path.dirname(os.path.realpath(__file__))
-    polars_root = os.path.abspath(f"{conf_dir_path}/../../pycisTopic")
+    package_root = os.path.abspath(f"{conf_dir_path}/../../src/pycisTopic")
 
-    fn = os.path.relpath(fn, start=polars_root)
+    fn = os.path.relpath(fn, start=package_root)
 
     return (
-        f"https://github.com/aertslab/pycisTopic/blob/polars/pycisTopic/{fn}{linespec}"
+        f"https://github.com/aertslab/pycisTopic/blob/master/src/pycisTopic/{fn}{linespec}"
     )
 
 
@@ -234,3 +200,7 @@ def setup(app):
     # TODO: a handful of methods do not seem to trigger the event for
     #  some reason (possibly @overloads?) - investigate further...
     app.connect("autodoc-process-signature", process_signature)
+
+
+# Notebooks are stored with their outputs and are not executed when building the docs.
+nbsphinx_execute = "never"

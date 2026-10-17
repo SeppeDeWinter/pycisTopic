@@ -4,28 +4,16 @@
 API
 ***
 
-cisTopic object
-===============
+AnnData container
+=================
 
-.. automodule:: pycisTopic.cistopic_class
+.. automodule:: pycisTopic.adata
    :members:
-   
-Pseudobulk formation and peak calling
-=====================================
 
-.. automodule:: pycisTopic.pseudobulk_peak_calling
-   :members:
-   
-Iterative peak filtering
-========================
+Conversion of pycisTopic 2 objects
+==================================
 
-.. automodule:: pycisTopic.iterative_peak_calling
-   :members:
-   
-Fragments
-=========
-
-.. automodule:: pycisTopic.fragments
+.. automodule:: pycisTopic.legacy
    :members:
 
 Gene annotation
@@ -34,16 +22,28 @@ Gene annotation
 .. automodule:: pycisTopic.gene_annotation
    :members:
 
+Fragments
+=========
+
+.. automodule:: pycisTopic.fragments
+   :members:
+
 Genomic ranges
 ==============
 
 .. automodule:: pycisTopic.genomic_ranges
    :members:
 
-TSS profile
-===========
+Pseudobulk and peak calling
+===========================
 
-.. automodule:: pycisTopic.tss_profile
+.. automodule:: pycisTopic.peak_calling
+   :members:
+
+Consensus peaks
+===============
+
+.. automodule:: pycisTopic.consensus_peaks
    :members:
 
 QC
@@ -51,70 +51,69 @@ QC
 
 .. automodule:: pycisTopic.qc
    :members:
-   
-Topic modelling
-===============
 
-.. automodule:: pycisTopic.lda_models
+.. automodule:: pycisTopic.tss_profile
    :members:
-   
-Clustering & visualization
-==========================
 
-.. automodule:: pycisTopic.clust_vis
+.. automodule:: pycisTopic.plotting.qc_plot
    :members:
-   
-Drop-out imputation & Differential features
-===========================================
 
-.. automodule:: pycisTopic.diff_features
+Count matrix
+============
+
+.. automodule:: pycisTopic.count_matrix
    :members:
-   
+
+Topic modeling
+==============
+
+.. automodule:: pycisTopic.topic_modeling.lda
+   :members:
+
+.. automodule:: pycisTopic.topic_modeling.mallet_models
+   :members:
+
+.. automodule:: pycisTopic.topic_modeling.stats
+   :members:
+
+.. automodule:: pycisTopic.topic_modeling.create_anndata
+   :members:
+
 Topic binarization
 ==================
 
 .. automodule:: pycisTopic.topic_binarization
    :members:
-   
+
 Topic QC
 ========
 
 .. automodule:: pycisTopic.topic_qc
    :members:
 
-Export to loom
-==============
+Imputed accessibility
+=====================
 
-.. automodule:: pycisTopic.loom
+.. automodule:: pycisTopic.imputed_accessibility
    :members:
-   
-   
+
+Differentially accessible regions
+=================================
+
+.. automodule:: pycisTopic.diff_features
+   :members:
+
 Signature enrichment
 ====================
 
+.. automodule:: pycisTopic.aucell
+   :members:
+
 .. automodule:: pycisTopic.signature_enrichment
    :members:
-   
-pyGREAT
-=======
 
-.. automodule:: pycisTopic.pyGREAT
-   :members:
-   
 Gene activity
 =============
 
 .. automodule:: pycisTopic.gene_activity
-   :members:
-   
-Label transfer
-==============
-
-.. automodule:: pycisTopic.label_transfer
-   :members:
-   
-Utils
-=====
-
-.. automodule:: pycisTopic.utils
    :members:

@@ -9,21 +9,35 @@ pycisTopic is a Python module to simultaneously identify cell states and cis-reg
 Installation
 ************
 
-pycisTopic can be installed with your environment manager of choice. One option is ``conda``::
+pycisTopic requires Python 3.12 or newer. Install it, for example with `uv`_::
+
+	git clone https://github.com/aertslab/pycisTopic.git
+	cd pycisTopic
+	uv venv --python 3.12
+	uv pip install ".[plot]"
+
+or with ``pip`` in a ``conda`` environment::
 
 	conda create --name pycistopic python=3.12 -y
 	conda activate pycistopic
 	git clone https://github.com/aertslab/pycisTopic.git
 	cd pycisTopic
-	pip install .
+	pip install ".[plot]"
 
-You can also install `SCENIC+`_, which includes pycisTopic::
+MACS3 is installed as a dependency and compiled during installation (a C compiler is
+needed).
 
-	conda create --name scenicplus python=3.11 -y
-	conda activate scenicplus
-	git clone https://github.com/aertslab/scenicplus.git
-	cd scenicplus
-	pip install .
+Topic modeling is done with the built-in parallel LDA sampler
+(``pycistopic topic_modeling lda``). Optionally, `Mallet`_ (2.1.1, needs Java 17 or
+newer) can be used instead; it is installed separately::
+
+	wget https://github.com/mimno/Mallet/releases/download/v2.1.1/mallet-2.1.1-bin.zip
+	unzip mallet-2.1.1-bin.zip
+
+.. _uv: https://docs.astral.sh/uv/
+.. _Mallet: https://github.com/mimno/Mallet/releases/tag/v2.1.1
+
+You can also install `SCENIC+`_, which includes pycisTopic.
 
 .. _SCENIC+: https://github.com/aertslab/scenicplus
 
@@ -32,6 +46,8 @@ Check version
 
 To check your pycisTopic version::
 
+	pycistopic --help
+
 	import pycisTopic
 	pycisTopic.__version__
 
@@ -39,6 +55,9 @@ Tutorials & documentation
 *************************
 
 Tutorial and documentation are available at https://pycistopic.readthedocs.io/.
+
+pycisTopic 3 is not compatible with pycisTopic 2. See the migration guide in the
+documentation and ``CHANGELOG.rst`` for the changes.
 
 Questions?
 **********

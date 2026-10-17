@@ -1,10 +1,10 @@
 .. _tutorials:
 
-**********
+*********
 Tutorials
-**********
+*********
 
 .. toctree::
-    :maxdepth: 3
-    
-    notebooks/human_cerebellum.ipynb
+    :maxdepth: 1
+
+    notebooks/pbmc_10k_multiome.ipynb

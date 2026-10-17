@@ -1,75 +1,100 @@
-**************
+****
 FAQs
-**************
+****
+
+I have a pycisTopic 2 analysis (``CistopicObject``), can I continue with pycisTopic 3?
+======================================================================================
+
+Yes. Convert the pickled object to the pycisTopic AnnData format::
+
+    pycistopic convert -i cistopic_obj.pkl -o cistopic_obj.h5ad --store_matrix
+
+The selected topic model, cell and region data and projections (e.g. UMAP) are kept.
+See :ref:`migration` for how pycisTopic 2 functions map to pycisTopic 3.
 
 
-1. I have a cisTopic analysis in R, can I still use pycisTopic/SCENIC+?
-================
+I have a cisTopic analysis in R, can I use it in pycisTopic?
+============================================================
 
-Yes, you can! There is no need to repeat the topic modelling in Python. For this, you will need to do the following in R first::
+Yes, there is no need to repeat the topic modeling. Export the cell-topic and
+region-topic probabilities in R::
 
+    library(arrow)
+    cisTopic_obj <- readRDS(PATH_TO_YOUR_CISTOPICOBJECT)
+    cell_topic <- as.data.frame(t(modelMatSelection(cisTopic_obj, "cell", "Probability")))
+    region_topic <- as.data.frame(t(modelMatSelection(cisTopic_obj, "region", "Probability", all.regions = TRUE)))
+    cell_topic$cell <- rownames(cell_topic)
+    region_topic$region <- rownames(region_topic)
+    write_feather(cell_topic, "cell_topic.feather")
+    write_feather(region_topic, "region_topic.feather")
 
-	# Export data to python
-	library(arrow)
-	path <- OUTDIR
-	cisTopic_obj <- readRDS(PATH_TO_YOUR_CISTOPICOBJECT)
-	modelMat <- modelMatSelection(cisTopic_obj, 'cell', 'Probability')
-	modelMat <- as.data.frame(modelMat)
-	write_feather(modelMat, sink=paste0(path, 'model_to_pycisTopic/cell_topic.feather'))
-	modelMat <- modelMatSelection(cisTopic_obj, 'region', 'Probability', all.regions=TRUE)
-	modelMat <- as.data.frame(modelMat)
-	write_feather(modelMat, sink=paste0(path, 'model_to_pycisTopic/topic_region.feather'))
-	# You can also save the count.matrix
-	ct <- cisTopicObject@count.matrix
-	ct <- as.data.frame(ct)
-	write_feather(ct, sink=paste0(path, 'model_to_pycisTopic/count_matrix.feather'))
+and create a pycisTopic AnnData object in Python (region names are in
+``chrom:start-end`` format)::
 
+    import polars as pl
+    from pycisTopic.adata import create_anndata
 
-And then in Python::
-
-
-
-	import pycisTopic
-	## 1. Initialize cisTopic object
-	from pycisTopic.cistopic_class import *
-	# Load count matrix
-	matrix_path=PATH_TO_FRAGMENTS_MATRIX
-	fragment_matrix = pd.read_feather(matrix_path)
-	cisTopic_obj = create_cistopic_object(fragment_matrix)
-	# Also add the cell annotation, cell_data should be a pandas df with cells as rows (cell names as index) and variables as columns
-	cisTopic_obj.add_cell_data(cell_data)
-	## 2. Add model
-	from pycisTopic.utils import *
-	model = load_cisTopic_model(PATH_TO_THE_FOLDER_WHERE_YOU_SAVED_DATA_FROM_R)
-	cistopic_obj.add_LDA_model(model)
-	# You can continue with the rest of the pipeline.
+    cell_topic = pl.read_ipc("cell_topic.feather")
+    region_topic = pl.read_ipc("region_topic.feather")
+    adata = create_anndata(
+        cell_topic=cell_topic.drop("cell").to_numpy(),
+        region_topic=region_topic.drop("region").to_numpy(),
+        cell_barcodes=cell_topic["cell"].to_list(),
+        region_ids=region_topic["region"].to_list(),
+    )
+    adata.write_h5ad("cistopic.h5ad")
 
 
-Feel free to adapt this function if you do not want to work in feather format::
+I processed my data with another tool (e.g. Signac/ArchR), can I use pycisTopic?
+================================================================================
+
+Yes. ``pycistopic topic_modeling lda run`` takes a binary
+region x cell matrix in Matrix Market format (``PREFIX.matrix.mtx``) with the cell
+barcodes and region IDs (``chrom:start-end``) in ``PREFIX.cell_barcodes.tsv`` and
+``PREFIX.region_ids.tsv``, so you can start topic modeling from a count matrix created
+with another tool (binarize the counts first)::
+
+    import scipy.io
+    import scipy.sparse
+
+    binary_matrix = scipy.sparse.csr_matrix(counts_regions_x_cells > 0, dtype="int32")
+    scipy.io.mmwrite("matrix.matrix.mtx", binary_matrix)
+
+We recommend to use consensus peaks called on pseudobulks per cell type (see the
+tutorial).
 
 
-	def load_cisTopic_model(path_to_cisTopic_model_matrices):
-		metrics = None
-		coherence = None
-		marg_topic = None
-		topic_ass = None
-		cell_topic = pd.read_feather(path_to_cisTopic_model_matrices + "cell_topic.feather")
-		cell_topic.index = ["Topic" + str(x) for x in range(1, cell_topic.shape[0] + 1)]
-		topic_region = pd.read_feather(
-			path_to_cisTopic_model_matrices + "topic_region.feather"
-		)
-		topic_region.index = ["Topic" + str(x) for x in range(1, topic_region.shape[0] + 1)]
-		topic_region = topic_region.T
-		parameters = None
-		model = cisTopicLDAModel(
-			metrics, coherence, marg_topic, topic_ass, cell_topic, topic_region, parameters
-		)
-		return model
+How do I correct for batch effects?
+===================================
 
-2. I have an analysis with another tool (e.g. Signac/ArchR), can I still use pycisTopic/SCENIC+?
-================
+Cell-topic probabilities can be corrected with Harmony, as implemented in scanpy::
 
-Here you have two options:
+    import scanpy as sc
 
-* **Start from the count matrix**: If you have performed QC steps and generated your fragment count matrix with another tool, you can directly start with the creation of the cisTopic object. In `this tutorial <https://pycistopic.readthedocs.io/en/latest/Toy_melanoma-RTD.html>`_ you have an example on how to do this.
-* **Skip the topic modelling**: We do not recommend this option as we have not tested it, but technically it is possible. You would need to get 1) a denoised fragments count matrix and 2) region sets. The region sets will be used as input for cisTarget. The region sets could be Differentially Accessible Regions (DARs); however we do recommend to use topics as well as they can capture regions with accessibility patterns without the need of specifying contrasts. If only using DARs you will have to make sure to make the right contrats (for example, all cell types versus the rest; higher cell type groups versus rest, etc). For example, in the cortex data set the topics reveal a topic of regions shared across all neurons; this pattern would be lost if you only do contrasts per cell type and not higher groups. In conclusion, it is possible to plug it in code-wise; but we can't assure results will be as good as the workflow we propose.
+    sc.external.pp.harmony_integrate(
+        adata, key="sample_id", basis="X_topic", adjusted_basis="X_topic_harmony"
+    )
+    sc.pp.neighbors(adata, use_rep="X_topic_harmony")
+
+Topic modeling itself is not affected by the correction, so topics, DARs and gene
+activity are calculated on the uncorrected model.
+
+
+Mallet fails with ``UnsupportedClassVersionError`` or runs out of memory
+========================================================================
+
+Only relevant when using Mallet instead of ``pycistopic topic_modeling lda``.
+
+* ``UnsupportedClassVersionError``: Mallet 2.1 needs Java 17 or newer (check with
+  ``java -version``).
+* ``OutOfMemoryError``: increase the memory available to Mallet with ``-m`` (in GB) of
+  the ``pycistopic topic_modeling mallet`` commands.
+
+
+Signature enrichment gives (almost) zero AUC values
+===================================================
+
+AUCell only considers the top ranked regions of each cell (5% by default). With few
+regions in the dataset or small signatures, increase ``--auc-threshold`` of
+``pycistopic signature_enrichment``. Also check that the signature uses the same
+chromosome names (e.g. ``chr1`` or ``1``) and genome assembly as the regions.
