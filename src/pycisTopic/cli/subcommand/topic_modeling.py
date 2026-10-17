@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from argparse import ArgumentTypeError
 from typing import TYPE_CHECKING
@@ -85,7 +86,6 @@ def run_topic_modeling_with_mallet(args):
 
 
 def run_topic_modeling_with_lda(args):
-    import os
 
     import scipy.io
 
@@ -144,6 +144,8 @@ def run_convert_binary_matrix_to_mallet_corpus_file_with_mallet(args):
 
     binary_accessibility_matrix_filename = args.binary_accessibility_matrix_filename
     mallet_corpus_filename = args.mallet_corpus_filename
+    if os.path.dirname(mallet_corpus_filename):
+        os.makedirs(os.path.dirname(mallet_corpus_filename), exist_ok=True)
     mallet_path = args.mallet_path
     memory_in_gb = args.memory_in_gb
 
@@ -180,6 +182,8 @@ def run_convert_binary_matrix_to_mallet_corpus_file_with_malletjson(args):
 
     binary_accessibility_matrix_filename = args.binary_accessibility_matrix_filename
     mallet_corpus_filename = args.mallet_corpus_filename
+    if os.path.dirname(mallet_corpus_filename):
+        os.makedirs(os.path.dirname(mallet_corpus_filename), exist_ok=True)
     memory_in_gb = args.memory_in_gb
     malletjson_jar = args.malletjson_jar
 
@@ -248,8 +252,6 @@ def run_mallet_plot_model_evaluation_stats(args):
 
 def binarize_cell_or_region_topic(args):
     """Binarize cell-topics or region-topics."""
-    import os
-
     import anndata
 
     from pycisTopic.adata import get_cell_topic, get_region_topic

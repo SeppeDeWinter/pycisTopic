@@ -59,3 +59,24 @@ def test_leaf_commands_have_a_function():
                 a for a in subparser._actions if isinstance(a, argparse._SubParsersAction)
             ).choices[name]
         assert callable(subparser.get_default("func")), path
+
+
+def test_create_output_dirs(tmp_path):
+    import argparse
+
+    from pycisTopic.cli.pycistopic import create_output_dirs
+
+    args = argparse.Namespace(
+        output_prefix=str(tmp_path / "a" / "prefix"),
+        output=str(tmp_path / "b" / "file.h5ad"),
+        output_dir=str(tmp_path / "c" / "d"),
+        plot=None,
+        regions_bed_filename=str(tmp_path / "input" / "regions.bed"),
+    )
+    create_output_dirs(args)
+    assert (tmp_path / "a").is_dir()
+    assert not (tmp_path / "a" / "prefix").exists()
+    assert (tmp_path / "b").is_dir()
+    assert (tmp_path / "c" / "d").is_dir()
+    # Input files are not touched.
+    assert not (tmp_path / "input").exists()

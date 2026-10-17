@@ -180,7 +180,8 @@ CLI = [sys.executable, "-m", "pycisTopic.cli.pycistopic", "count_matrix"]
 
 def test_cli_create(small_files, mapping_files, tmp_path):
     sample_fragments, sample_barcodes = mapping_files
-    prefix = tmp_path / "cli"
+    # Output directory does not exist yet.
+    prefix = tmp_path / "out" / "matrix" / "cli"
     subprocess.run(
         [
             *CLI,

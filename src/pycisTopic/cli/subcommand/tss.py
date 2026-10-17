@@ -486,7 +486,13 @@ def get_chrom_sizes_and_alias_mapping_from_ucsc(
     )
 
 
+def _create_parent_dir(filename: str | None) -> None:
+    if filename and os.path.dirname(filename):
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+
+
 def run_tss_get_tss_annotation(args):
+    _create_parent_dir(args.tss_annotation_bed_filename)
     get_tss_annotation_bed_file(
         tss_annotation_bed_filename=args.tss_annotation_bed_filename,
         biomart_name=args.biomart_name,
@@ -519,6 +525,7 @@ def run_tss_get_ncbi_acc(args):
 
 
 def run_tss_get_ncbi_chrom_sizes_and_alias_mapping(args):
+    _create_parent_dir(args.chrom_sizes_and_alias_tsv_filename)
     get_chrom_sizes_and_alias_mapping_from_ncbi(
         accession_id=args.ncbi_accession_id,
         chrom_sizes_and_alias_tsv_filename=args.chrom_sizes_and_alias_tsv_filename,
@@ -526,6 +533,7 @@ def run_tss_get_ncbi_chrom_sizes_and_alias_mapping(args):
 
 
 def run_tss_get_ucsc_chrom_sizes_and_alias_mapping(args):
+    _create_parent_dir(args.chrom_sizes_and_alias_tsv_filename)
     get_chrom_sizes_and_alias_mapping_from_ucsc(
         ucsc_assembly=args.ucsc_assembly,
         chrom_sizes_and_alias_tsv_filename=args.chrom_sizes_and_alias_tsv_filename,
