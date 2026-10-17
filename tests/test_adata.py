@@ -66,6 +66,16 @@ class TestCreateAnnData:
         assert adata.uns["pycistopic"]["model"] == {"alpha": 50, "cmd": ["a", "1"]}
         assert "version" in adata.uns["pycistopic"]
 
+    def test_read_only_input(self, model):
+        cell_topic, region_topic, _ = model
+        cell_topic = cell_topic.astype(np.float32)
+        region_topic = region_topic.astype(np.float32)
+        cell_topic.flags.writeable = False
+        region_topic.flags.writeable = False
+        adata = create_anndata(cell_topic, region_topic, CELLS, REGIONS)
+        assert adata.obsm["X_topic"].flags.writeable
+        assert adata.varm["topic"].flags.writeable
+
     def test_h5ad_roundtrip(self, model, tmp_path):
         cell_topic, region_topic, binary_matrix = model
         topic_stats = pd.DataFrame({"Coherence": [-1.0, -2.0, -3.0]})

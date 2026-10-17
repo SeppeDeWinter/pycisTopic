@@ -1,11 +1,12 @@
 """
 End-to-end test of the pycisTopic CLI on a small synthetic dataset.
 
-Runs QC, count matrix creation, Mallet topic modeling, model statistics, AnnData
-creation, topic binarization, topic QC, DARs, signature enrichment and gene activity.
+Runs QC, count matrix creation, topic modeling, model statistics, AnnData creation,
+topic binarization, topic QC, DARs, signature enrichment and gene activity.
 
-Requires Java and Mallet, so it only runs when ``PYCISTOPIC_TEST_MALLET`` is set to
-the Mallet executable, e.g.::
+Topic modeling is done with the pycisTopic LDA sampler and with Mallet. The Mallet
+version requires Java and Mallet, so it only runs when ``PYCISTOPIC_TEST_MALLET`` is
+set to the Mallet executable, e.g.::
 
     PYCISTOPIC_TEST_MALLET=/path/to/mallet/bin/mallet pytest tests/test_end_to_end.py
 """
@@ -29,9 +30,6 @@ CLI = [sys.executable, "-m", "pycisTopic.cli.pycistopic"]
 SAMPLES = ("sampleA", "sampleB")
 CELL_TYPES = "ABC"
 
-pytestmark = pytest.mark.skipif(
-    not MALLET, reason="PYCISTOPIC_TEST_MALLET (Mallet executable) is not set."
-)
 
 
 def _make_dataset(path, rng):
@@ -121,7 +119,20 @@ def _run(*args, cwd):
     assert result.returncode == 0, f"{' '.join(map(str, args))}\n{result.stderr}"
 
 
-def test_end_to_end(tmp_path):
+@pytest.mark.parametrize(
+    "backend",
+    [
+        "lda",
+        pytest.param(
+            "mallet",
+            marks=pytest.mark.skipif(
+                not MALLET,
+                reason="PYCISTOPIC_TEST_MALLET (Mallet executable) is not set.",
+            ),
+        ),
+    ],
+)
+def test_end_to_end(tmp_path, backend):
     metadata = _make_dataset(tmp_path, np.random.default_rng(0))
 
     def run(*args):
@@ -136,17 +147,23 @@ def test_end_to_end(tmp_path):
         "count_matrix", "create", "-f", "sample_fragments.tsv",
         "-c", "sample_barcodes.tsv", "-r", "regions.bed", "-o", "matrix", "-d", "-1",
     )  # fmt: skip
+    if backend == "mallet":
+        run(
+            "topic_modeling", "mallet", "create_corpus_with_mallet",
+            "-i", "matrix.matrix.mtx", "-o", "corpus", "-b", MALLET, "-m", 1,
+        )  # fmt: skip
+        run(
+            "topic_modeling", "mallet", "run", "-i", "corpus", "-o", "model",
+            "-t", 3, "-p", 2, "-n", 200, "-s", 555, "-m", 1, "-b", MALLET,
+        )  # fmt: skip
+    else:
+        run(
+            "topic_modeling", "lda", "run", "-i", "matrix.matrix.mtx", "-o", "model",
+            "-t", 3, "-p", 2, "-n", 200, "-s", 555,
+        )  # fmt: skip
+    run("topic_modeling", backend, "stats", "-i", "matrix.matrix.mtx", "-o", "model", "-t", 3)
     run(
-        "topic_modeling", "mallet", "create_corpus_with_mallet",
-        "-i", "matrix.matrix.mtx", "-o", "corpus", "-b", MALLET, "-m", 1,
-    )  # fmt: skip
-    run(
-        "topic_modeling", "mallet", "run", "-i", "corpus", "-o", "model",
-        "-t", 3, "-p", 2, "-n", 200, "-s", 555, "-m", 1, "-b", MALLET,
-    )  # fmt: skip
-    run("topic_modeling", "mallet", "stats", "-i", "matrix.matrix.mtx", "-o", "model", "-t", 3)
-    run(
-        "topic_modeling", "mallet", "create_anndata", "-i", "matrix.matrix.mtx",
+        "topic_modeling", backend, "create_anndata", "-i", "matrix.matrix.mtx",
         "-o", "model", "-t", 3, "--qc_dir", "qc", "-d", "-1", "--store_matrix",
     )  # fmt: skip
 
@@ -164,8 +181,8 @@ def test_end_to_end(tmp_path):
     assert mean_per_cell_type.to_numpy().max(axis=1).min() > 0.5
 
     model = "model.3_topics.h5ad"
-    run("topic_modeling", "mallet", "binarize", "-a", "region", "-m", "otsu", "-i", model, "-p", "bin")
-    run("topic_modeling", "mallet", "binarize", "-a", "cell", "-m", "aucell", "-i", model, "-p", "bin")
+    run("topic_modeling", backend, "binarize", "-a", "region", "-m", "otsu", "-i", model, "-p", "bin")
+    run("topic_modeling", backend, "binarize", "-a", "cell", "-m", "aucell", "-i", model, "-p", "bin")
     run("topic_qc", "-a", model, "-o", model, "--annotation", "cell_type", "--table", "topics.tsv")
     topics = pd.read_csv(tmp_path / "topics.tsv", sep="\t", index_col=0)
     assert sorted(topics["cell_type"]) == list(CELL_TYPES)

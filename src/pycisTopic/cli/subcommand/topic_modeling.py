@@ -84,6 +84,57 @@ def run_topic_modeling_with_mallet(args):
         )
 
 
+def run_topic_modeling_with_lda(args):
+    import os
+
+    import scipy.io
+
+    from pycisTopic.topic_modeling.lda import run_lda_topic_modeling
+
+    n_topics_list = [args.topics] if isinstance(args.topics, int) else args.topics
+
+    # Bind threads to cores (unless set by the user): more stable run times.
+    os.environ.setdefault("OMP_PROC_BIND", "spread")
+
+    level = logging.INFO if args.verbose else logging.WARNING
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(name)-12s %(levelname)-8s %(message)s",
+        handlers=[logging.StreamHandler(stream=sys.stdout)],
+    )
+
+    print("Run topic modeling with the pycisTopic LDA sampler with the following settings:")
+    print(f"  - Binary accessibility matrix:                {args.binary_accessibility_matrix_filename}")
+    print(f"  - Output prefix:                              {args.output_prefix}")
+    print(f"  - Number of topics to run topic modeling for: {n_topics_list}")
+    print(f"  - Alpha:                                      {args.alpha}")
+    print(f"  - Divide alpha by the number of topics:       {args.alpha_by_topic}")
+    print(f"  - Eta:                                        {args.eta}")
+    print(f"  - Divide eta by the number of topics:         {args.eta_by_topic}")
+    print(f"  - Number of iterations of Gibbs sampling:     {args.iterations}")
+    print(f"  - Number of threads:                          {args.parallel}")
+    print(f"  - Seed:                                       {args.seed}")
+
+    binary_matrix = scipy.io.mmread(args.binary_accessibility_matrix_filename)
+
+    run_lda_topic_modeling(
+        binary_matrix=binary_matrix,
+        output_prefix=args.output_prefix,
+        n_topics=n_topics_list,
+        alpha=args.alpha,
+        alpha_by_topic=args.alpha_by_topic,
+        eta=args.eta,
+        eta_by_topic=args.eta_by_topic,
+        iterations=args.iterations,
+        random_seed=args.seed,
+        n_threads=args.parallel,
+    )
+
+    print(
+        f'\nWrote topic modeling output files to "{args.output_prefix}.<n_topics>_topics.*".'
+    )
+
+
 def run_convert_binary_matrix_to_mallet_corpus_file_with_mallet(args):
     import scipy
 
@@ -666,8 +717,138 @@ def add_parser_topic_modeling(subparsers: _SubParsersAction[ArgumentParser]):
         help="Enable verbose mode.",
     )
 
+    _add_model_output_subcommands(subparser_topic_modeling_mallet)
+
+    parser_topic_modeling_lda = subparser_topic_modeling.add_parser(
+        "lda",
+        help="Run LDA topic modeling with the pycisTopic parallel Gibbs sampler (fast, no Java needed).",
+    )
+    subparser_topic_modeling_lda = parser_topic_modeling_lda.add_subparsers(
+        title="Topic modeling with the pycisTopic LDA sampler",
+        dest="lda",
+        help="List of LDA topic modeling subcommands.",
+    )
+    subparser_topic_modeling_lda.required = True
+
+    parser_topic_modeling_lda_run = subparser_topic_modeling_lda.add_parser(
+        "run",
+        help="Run LDA topic modeling with the pycisTopic parallel Gibbs sampler.",
+        description="Run LDA topic modeling with the pycisTopic parallel collapsed Gibbs "
+        "sampler. Same model as Mallet (without hyperparameter optimization) and output "
+        "files in the same format, so the other topic modeling subcommands can be used "
+        "on the output.",
+    )
+    parser_topic_modeling_lda_run.set_defaults(func=run_topic_modeling_with_lda)
+    parser_topic_modeling_lda_run.add_argument(
+        "-i",
+        "--input",
+        dest="binary_accessibility_matrix_filename",
+        action="store",
+        type=str,
+        required=True,
+        help="Binary accessibility matrix (region IDs vs cell barcodes) in Matrix "
+        "Market format.",
+    )
+    parser_topic_modeling_lda_run.add_argument(
+        "-o",
+        "--output",
+        dest="output_prefix",
+        action="store",
+        type=str,
+        required=True,
+        help="Topic model output prefix.",
+    )
+    parser_topic_modeling_lda_run.add_argument(
+        "-t",
+        "--topics",
+        dest="topics",
+        type=int,
+        required=True,
+        nargs="+",
+        help="Number(s) of topics to create during topic modeling.",
+    )
+    parser_topic_modeling_lda_run.add_argument(
+        "-p",
+        "--parallel",
+        dest="parallel",
+        type=int,
+        required=False,
+        default=8,
+        help="Number of threads to use. Default: 8.",
+    )
+    parser_topic_modeling_lda_run.add_argument(
+        "-n",
+        "--iterations",
+        dest="iterations",
+        type=int,
+        required=False,
+        default=150,
+        help="Number of iterations of Gibbs sampling. Default: 150.",
+    )
+    parser_topic_modeling_lda_run.add_argument(
+        "-a",
+        "--alpha",
+        dest="alpha",
+        type=float,
+        required=False,
+        default=50,
+        help="Alpha value. Default: 50.",
+    )
+    parser_topic_modeling_lda_run.add_argument(
+        "-A",
+        "--alpha_by_topic",
+        dest="alpha_by_topic",
+        type=str_to_bool,
+        choices=(True, False),
+        required=False,
+        default=True,
+        help="Whether the alpha value should by divided by the number of topics. Default: True.",
+    )
+    parser_topic_modeling_lda_run.add_argument(
+        "-e",
+        "--eta",
+        dest="eta",
+        type=float,
+        required=False,
+        default=0.1,
+        help="Eta value. Default: 0.1.",
+    )
+    parser_topic_modeling_lda_run.add_argument(
+        "-E",
+        "--eta_by_topic",
+        dest="eta_by_topic",
+        type=str_to_bool,
+        choices=(True, False),
+        required=False,
+        default=False,
+        help="Whether the eta value should by divided by the number of topics. Default: False.",
+    )
+    parser_topic_modeling_lda_run.add_argument(
+        "-s",
+        "--seed",
+        dest="seed",
+        type=int,
+        required=False,
+        default=555,
+        help="Seed for ensuring reproducibility. To get reproducible output, the "
+        "same number of threads has to be used. Default: 555.",
+    )
+    parser_topic_modeling_lda_run.add_argument(
+        "-v",
+        "--verbose",
+        dest="verbose",
+        action="store_true",
+        required=False,
+        help="Enable verbose mode.",
+    )
+
+    _add_model_output_subcommands(subparser_topic_modeling_lda)
+
+
+def _add_model_output_subcommands(subparser: _SubParsersAction[ArgumentParser]):
+    """Add subcommands which work on topic model output files (Mallet or LDA)."""
     parser_topic_modeling_mallet_calculate_stats = (
-        subparser_topic_modeling_mallet.add_parser(
+        subparser.add_parser(
             "stats",
             help="Calculate model evaluation statistics.",
             description="Calculate model evaluation statistics.",
@@ -714,7 +895,7 @@ def add_parser_topic_modeling(subparsers: _SubParsersAction[ArgumentParser]):
     )
 
     parser_topic_modeling_mallet_plot_stats = (
-        subparser_topic_modeling_mallet.add_parser(
+        subparser.add_parser(
             "plot_stats",
             help="Plot evaluation statistics.",
             description="Plot evaluation statistics.",
@@ -752,7 +933,7 @@ def add_parser_topic_modeling(subparsers: _SubParsersAction[ArgumentParser]):
         help="File format of the resulting plots. Default: png.",
     )
 
-    parser_topic_modeling_mallet_binarize = subparser_topic_modeling_mallet.add_parser(
+    parser_topic_modeling_mallet_binarize = subparser.add_parser(
         "binarize",
         help="Binarize cell- or region-topic probabilities.",
         description="Binarize cell- or region-topic probabilities.",
@@ -830,9 +1011,9 @@ def add_parser_topic_modeling(subparsers: _SubParsersAction[ArgumentParser]):
         help="Directory to store results.",
     )
 
-    parser_topic_modeling_mallet_anndata = subparser_topic_modeling_mallet.add_parser(
+    parser_topic_modeling_mallet_anndata = subparser.add_parser(
         "create_anndata",
-        help="Generate AnnData h5ad file from Mallet result.",
+        help="Generate AnnData h5ad file from topic model output.",
         description="Generate a pycisTopic AnnData h5ad file "
         "(OUTPUT_PREFIX.N_TOPICS_topics.h5ad, cells x regions) from Mallet result, "
         "with cell-topic probabilities in .obsm['X_topic'], region-topic "

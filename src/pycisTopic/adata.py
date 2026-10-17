@@ -140,8 +140,10 @@ def create_anndata(
     import anndata
     import scipy.sparse
 
-    cell_topic = np.asarray(cell_topic, dtype=np.float32)
-    region_topic = np.asarray(region_topic, dtype=np.float32)
+    # Copy, so the arrays are writable (e.g. arrays read from Parquet files are
+    # read-only, which fails in scanpy).
+    cell_topic = np.array(cell_topic, dtype=np.float32)
+    region_topic = np.array(region_topic, dtype=np.float32)
     n_cells, n_topics = cell_topic.shape
 
     if len(cell_barcodes) != n_cells:
