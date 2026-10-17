@@ -22,9 +22,9 @@ class JsonNumpyEncode(json.JSONEncoder):
 
 def loglikelihood(nzw, ndz, alpha, eta):
     """
-    Calculate the log likelihood of a LDA model.
+    Calculate the joint log likelihood ``log p(w, z)`` of a LDA model.
 
-    Same formula as used by the `lda` package (``lda._lda._loglikelihood``).
+    Same formula as Mallet's ``modelLogLikelihood`` (zero counts do not contribute).
 
     Parameters
     ----------
@@ -47,20 +47,25 @@ def loglikelihood(nzw, ndz, alpha, eta):
     n_docs, n_topics = ndz.shape
     vocab_size = nzw.shape[1]
 
-    const_prior = (n_topics * math.lgamma(alpha) - math.lgamma(alpha * n_topics)) * n_docs
-    const_ll = (vocab_size * math.lgamma(eta) - math.lgamma(eta * vocab_size)) * n_topics
-
     # Calculate log p(w|z).
-    topic_ll = scipy.special.gammaln(nzw[nzw > 0] + eta).sum() - scipy.special.gammaln(
-        nzw.sum(axis=1) + eta * vocab_size
-    ).sum()
+    nonzero_nzw = nzw[nzw > 0]
+    topic_ll = (
+        scipy.special.gammaln(nonzero_nzw + eta).sum()
+        - nonzero_nzw.shape[0] * math.lgamma(eta)
+        + n_topics * math.lgamma(eta * vocab_size)
+        - scipy.special.gammaln(nzw.sum(axis=1) + eta * vocab_size).sum()
+    )
 
     # Calculate log p(z).
-    doc_ll = scipy.special.gammaln(ndz[ndz > 0] + alpha).sum() - scipy.special.gammaln(
-        ndz.sum(axis=1) + alpha * n_topics
-    ).sum()
+    nonzero_ndz = ndz[ndz > 0]
+    doc_ll = (
+        scipy.special.gammaln(nonzero_ndz + alpha).sum()
+        - nonzero_ndz.shape[0] * math.lgamma(alpha)
+        + n_docs * math.lgamma(alpha * n_topics)
+        - scipy.special.gammaln(ndz.sum(axis=1) + alpha * n_topics).sum()
+    )
 
-    return float(doc_ll - const_prior + topic_ll - const_ll)
+    return float(doc_ll + topic_ll)
 
 
 def calculate_model_evaluation_stats(
@@ -148,7 +153,12 @@ def calculate_model_evaluation_stats(
         return_mean=False,
     )
 
-    doc_topic_counts = (doc_topic_distrib.T * (cell_cov)).T
+    # Cell-topic counts (cell-topic probabilities: (n_dk + alpha) / (n_d + K * alpha)).
+    doc_topic_counts = np.rint(
+        np.asarray(doc_topic_distrib, dtype=np.float64)
+        * (cell_cov.reshape(-1, 1) + n_topics * ll_alpha)
+        - ll_alpha
+    ).clip(min=0)
     ll = loglikelihood(topic_word_counts, doc_topic_counts, ll_alpha, ll_eta)
 
     marg_topic = tmtoolkit_lite.topicmod.model_stats.marginal_topic_distrib(

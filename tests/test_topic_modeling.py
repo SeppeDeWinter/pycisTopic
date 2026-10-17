@@ -105,24 +105,28 @@ class TestMalletOutputConversion:
 
 
 def _reference_loglikelihood(nzw, ndz, alpha, eta):
-    """Log likelihood of a LDA model as in the `lda` package (`lda._lda`)."""
+    """
+    Joint log likelihood log p(w, z) of a LDA model (as in Mallet).
+
+    p(z) = prod_d Gamma(K alpha) / Gamma(K alpha + n_d) prod_k Gamma(n_dk + alpha) / Gamma(alpha)
+    p(w | z) = prod_k Gamma(V eta) / Gamma(V eta + n_k) prod_w Gamma(n_kw + eta) / Gamma(eta)
+    """
     n_docs, n_topics = ndz.shape
     vocab_size = nzw.shape[1]
     ll = 0.0
-    ll += (math.lgamma(eta * vocab_size) - vocab_size * math.lgamma(eta)) * n_topics
     for k in range(n_topics):
-        ll += sum(math.lgamma(c + eta) for c in nzw[k] if c > 0)
-        ll -= math.lgamma(eta * vocab_size + nzw[k].sum())
-    ll += (math.lgamma(alpha * n_topics) - n_topics * math.lgamma(alpha)) * n_docs
+        ll += math.lgamma(eta * vocab_size) - math.lgamma(eta * vocab_size + nzw[k].sum())
+        ll += sum(math.lgamma(c + eta) - math.lgamma(eta) for c in nzw[k])
     for d in range(n_docs):
-        ll += sum(math.lgamma(c + alpha) for c in ndz[d] if c > 0)
-        ll -= math.lgamma(alpha * n_topics + ndz[d].sum())
+        ll += math.lgamma(alpha * n_topics) - math.lgamma(alpha * n_topics + ndz[d].sum())
+        ll += sum(math.lgamma(c + alpha) - math.lgamma(alpha) for c in ndz[d])
     return ll
 
 
 def test_loglikelihood_matches_reference(rng):
     nzw = rng.integers(0, 10, (3, 8))
-    ndz = rng.integers(0, 10, (5, 3)) * 0.7  # cell-topic counts are not integers
+    ndz = rng.integers(0, 10, (5, 3))
+    assert (nzw == 0).any() and (ndz == 0).any()
     assert loglikelihood(nzw, ndz, 0.5, 0.1) == pytest.approx(
         _reference_loglikelihood(nzw, ndz, 0.5, 0.1)
     )

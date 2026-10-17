@@ -34,6 +34,12 @@ def plot_stats(
     """
     Plot topic modeling evaluation statistics.
 
+    The scaled (inverted) Arun_2010, (inverted) Cao_Juan_2009 and Mimno_2011 metrics
+    are plotted (higher is better). The log likelihood (in the ``*.stats.json`` files)
+    is not plotted: it is the joint log likelihood of the regions and their topic
+    assignments, which does not select a number of topics (it usually decreases with
+    more topics with the default ``alpha = 50 / n_topics``).
+
     Parameters
     ----------
     output_prefix
@@ -67,9 +73,6 @@ def plot_stats(
         ),
         "Mimno_2011": scale(
             np.array([metrics_per_topic[t].Mimno_2011 for t in n_topics])
-        ),
-        "Loglikelihood": scale(
-            np.array([metrics_per_topic[t].loglikelihood for t in n_topics])
         ),
     }
 

@@ -188,3 +188,24 @@ def test_invalid_number_of_topics(synthetic):
     corpus = LDACorpus(synthetic[0], n_partitions=1)
     with pytest.raises(ValueError, match="Number of topics"):
         train_lda(corpus, n_topics=0)
+
+
+def test_stats_log_likelihood_matches_sampler(synthetic, tmp_path):
+    from pycisTopic.topic_modeling.stats import calculate_model_evaluation_stats
+
+    prefix = str(tmp_path / "model")
+    run_lda_topic_modeling(
+        synthetic[0], prefix, n_topics=N_TOPICS, iterations=20, n_threads=2
+    )
+    calculate_model_evaluation_stats(
+        sp.csr_matrix(synthetic[0]), prefix, N_TOPICS, top_topics_coh=2
+    )
+    filenames = LDAMalletFilenames(prefix, N_TOPICS)
+    with open(filenames.model_stats_filename) as fh:
+        stats = json.load(fh)
+    with open(filenames.parameters_json_filename) as fh:
+        parameters = json.load(fh)
+    # Cell-topic counts are recovered exactly from the cell-topic probabilities.
+    assert stats["loglikelihood"] == pytest.approx(
+        parameters["log_likelihoods"][-1][1], rel=1e-6
+    )
