@@ -246,3 +246,23 @@ class TestNearest:
                 if c2 == c1 and ((e2 <= s1) if look_previous else (s2 >= e1))
             ]
             assert distance == (min(candidates) if candidates else None)
+
+
+@pytest.mark.parametrize("how", ["all", "containment", "first"])
+def test_ruranges_engine_matches_ncls(how):
+    pytest.importorskip("ruranges")
+    rng = np.random.default_rng(1)
+    df1 = _random_regions(rng, 200)
+    df2 = _random_regions(rng, 150)
+
+    def _sorted(df):
+        return df.sort(df.columns)
+
+    assert _sorted(
+        intersection(df1, df2, how=how, regions2_coord=True, engine="ruranges")
+    ).equals(
+        _sorted(intersection(df1, df2, how=how, regions2_coord=True, engine="ncls"))
+    )
+    assert _sorted(overlap(df1, df2, how=how, engine="ruranges")).equals(
+        _sorted(overlap(df1, df2, how=how, engine="ncls"))
+    )

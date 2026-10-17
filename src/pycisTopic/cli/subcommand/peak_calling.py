@@ -226,8 +226,7 @@ def add_parser_peak_calling(subparsers: _SubParsersAction[ArgumentParser]):
         help="Call peaks on pseudobulk fragment files with MACS3.",
         description="Call peaks with MACS3 (macs3 callpeak --format FRAG --max-count 1 "
         "--nomodel --nolambda --call-summits) on each *.fragments.tsv.gz file in a "
-        "directory. MACS3 needs to be installed separately (e.g. `conda install -c "
-        "bioconda macs3`).",
+        "directory.",
     )
     parser_callpeaks.set_defaults(func=run_callpeaks)
     parser_callpeaks.add_argument(

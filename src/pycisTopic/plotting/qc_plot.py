@@ -36,6 +36,8 @@ def plot_barcode_rank(
     """
     if ax is None:
         ax = plt.gca()
+    # Rows are not necessarily ordered by barcode rank (e.g. after joins).
+    fragments_stats_per_cb_df = fragments_stats_per_cb_df.sort("barcode_rank")
     ax.plot(
         fragments_stats_per_cb_df.get_column("barcode_rank"),
         fragments_stats_per_cb_df.get_column("unique_fragments_count"),
@@ -281,7 +283,7 @@ def _plot_fragment_stats(
 def plot_barcode_stats(
     sample_id: str,
     pycistopic_qc_output_dir: str | Path,
-    unique_fragments_threshold: int | None = None,
+    unique_fragments_threshold: float | None = None,
     tss_enrichment_threshold: float | None = None,
     frip_threshold: float | None = None,
     duplication_ratio_threshold: float | None = None,
@@ -299,7 +301,7 @@ def plot_barcode_stats(
         Sample ID.
     pycistopic_qc_output_dir : str | Path
         Directory containing the output of the ``pycistopic qc run`` command.
-    unique_fragments_threshold : int, optional
+    unique_fragments_threshold : float, optional
         Unique fragments threshold, by default None.
     tss_enrichment_threshold : float, optional
         TSS enrichment threshold, by default None.

@@ -54,7 +54,6 @@ def metric_arun_2010(topic_word_distrib, doc_topic_distrib, doc_lengths):
     :param doc_lengths: array of length `N` with number of tokens per document
     :return: calculated metric
     """
-
     # CM1 – sing. value decomp. of topic-word distrib.
     cm1 = np.linalg.svd(topic_word_distrib, compute_uv=False)
     cm1 /= np.sum(cm1)  # normalize

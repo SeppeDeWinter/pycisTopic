@@ -270,10 +270,10 @@ def subset_accessibility_matrix(
     cell_barcodes_filename = f"{prefix}.cell_barcodes.tsv"
     region_ids_filename = f"{prefix}.region_ids.tsv"
 
-    with open(cell_barcodes_filename, "r") as f:
+    with open(cell_barcodes_filename) as f:
         cell_barcodes = [line.strip() for line in f]
 
-    with open(region_ids_filename, "r") as f:
+    with open(region_ids_filename) as f:
         region_ids = [line.strip() for line in f]
 
     # Get indices for cell barcodes and region IDs to keep from the full lists.

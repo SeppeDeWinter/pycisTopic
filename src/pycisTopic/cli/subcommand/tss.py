@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import TYPE_CHECKING, Literal, Sequence
-
-import polars as pl
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from argparse import ArgumentParser, _SubParsersAction

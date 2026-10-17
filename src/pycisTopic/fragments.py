@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import gzip
 import os
-from typing import TYPE_CHECKING, Literal, Sequence, overload
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Literal, overload
 
 import polars as pl
 import scipy as sp
@@ -732,7 +733,7 @@ def get_fragments_per_cb(
             ]
         )
         .filter(pl.col(fragments_count_column) > min_fragments_per_cb)
-        .sort(fragments_count_column, descending=True)
+        .sort(fragments_count_column, descending=True, maintain_order=True)
         .with_row_index(
             name="barcode_rank",
             offset=1,

@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 def get_barcodes_passing_qc_for_sample(
     sample_id: str,
     pycistopic_qc_output_dir: str | Path,
-    unique_fragments_threshold: int | None = None,
+    unique_fragments_threshold: float | None = None,
     tss_enrichment_threshold: float | None = None,
     frip_threshold: float | None = None,
     use_automatic_thresholds: bool = True,
@@ -411,8 +411,10 @@ def compute_qc_stats(
         See :func:`pycisTopic.tss_profile.get_tss_profile`.
     tss_minimum_signal_window
         Average signal in the tails of the flanking window around the TSS:
-           - ``[-flank_window, -flank_window + minimum_signal_window + 1]``
-           - ``[flank_window - minimum_signal_window + 1, flank_window]``
+
+        - ``[-flank_window, -flank_window + minimum_signal_window + 1]``
+        - ``[flank_window - minimum_signal_window + 1, flank_window]``
+
         is used to normalize the TSS enrichment.
         Default: ``100`` (average signal in ``[-2000, -1901]``, ``[1901, 2000]``
         around TSS if ``flank_window=2000``).

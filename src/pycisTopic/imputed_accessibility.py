@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Iterator, Literal
+from collections.abc import Iterator
+from typing import Literal
 
 import numpy as np
 import numpy.typing as npt

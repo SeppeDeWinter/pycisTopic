@@ -283,6 +283,19 @@ def _overlap_per_chrom_ncls(
     return regions1_indexes
 
 
+
+def _import_ruranges():
+    """Import the optional ruranges package with an informative error message."""
+    try:
+        import ruranges.numpy
+    except ImportError as e:
+        raise ImportError(
+            'Intersection engine "ruranges" requires the ruranges package: install it '
+            'with "pip install pycisTopic[ruranges]" or use the "ncls" engine.'
+        ) from e
+    return ruranges.numpy
+
+
 def _intersect_per_chrom_ruranges(
     regions1_per_chrom_dfs_pl: dict[str, pl.DataFrame],
     regions2_per_chrom_dfs_pl: dict[str, pl.DataFrame],
@@ -332,7 +345,7 @@ def _intersect_per_chrom_ruranges(
         from Polars Dataframe 2 that have an overlap.
 
     """
-    import ruranges
+    ruranges = _import_ruranges()
 
     starts1, ends1, indexes1 = _get_start_end_and_indexes_for_chrom(
         regions1_per_chrom_dfs_pl,
@@ -363,7 +376,7 @@ def _intersect_per_chrom_ruranges(
             "'outer', 'left', 'right'."
         )
 
-    regions1_indexes, regions2_indexes = ruranges.overlaps_simple(
+    regions1_indexes, regions2_indexes = ruranges.overlaps(
         starts=starts1,
         ends=ends1,
         starts2=starts2,
@@ -493,7 +506,7 @@ def _overlap_per_chrom_ruranges(
         Indexes for regions from Polars Dataframe 1 that had an overlap.
 
     """
-    import ruranges
+    ruranges = _import_ruranges()
 
     starts1, ends1, indexes1 = _get_start_end_and_indexes_for_chrom(
         regions1_per_chrom_dfs_pl,
@@ -521,7 +534,7 @@ def _overlap_per_chrom_ruranges(
             "Valid values are: 'all', 'containment', 'first', 'last'."
         )
 
-    regions1_indexes, regions2_indexes = ruranges.overlaps_simple(
+    regions1_indexes, regions2_indexes = ruranges.overlaps(
         starts=starts1,
         ends=ends1,
         starts2=starts2,

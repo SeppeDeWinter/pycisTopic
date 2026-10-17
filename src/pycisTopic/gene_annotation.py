@@ -3,8 +3,9 @@ from __future__ import annotations
 import io
 import json
 import re
+from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING
 
 import polars as pl
 import requests
@@ -276,9 +277,9 @@ def read_tss_annotation_from_bed(tss_annotation_bed_filename: str) -> pl.DataFra
         TSS annotation BED files can be written with
         :func:`pycisTopic.gene_annotation.write_tss_annotation_to_bed`
         and will have the following header line:
-            ``# Chromosome Gene_start Gene_end Gene Score Strand TSS_start TSS_end Transcript_type Ensembl_gene_id``
+        ``# Chromosome Gene_start Gene_end Gene Score Strand TSS_start TSS_end Transcript_type Ensembl_gene_id``.
         Minimum required columns for :func:`pycisTopic.tss_profile.get_tss_profile`:
-            ``Chromosome``, ``TSS_start`` (0-based BED) and ``Strand``
+        ``Chromosome``, ``TSS_start`` (0-based BED) and ``Strand``.
 
     See Also
     --------
@@ -357,9 +358,9 @@ def write_tss_annotation_to_bed(
         TSS annotation BED files from
         :func:`pycisTopic.gene_annotation.get_tss_annotation_from_ensembl`
         will have the following header line:
-            ``# Chromosome Gene_start Gene_end Gene Score Strand TSS_start TSS_end Transcript_type Ensembl_gene_id``
+        ``# Chromosome Gene_start Gene_end Gene Score Strand TSS_start TSS_end Transcript_type Ensembl_gene_id``.
         Minimum required columns for :func:`pycisTopic.tss_profile.get_tss_profile`:
-            ``Chromosome``, ``TSS_start`` (0-based BED) and ``Strand``
+        ``Chromosome``, ``TSS_start`` (0-based BED) and ``Strand``.
 
     See Also
     --------
@@ -709,7 +710,7 @@ def get_chrom_sizes_and_alias_mapping_from_ucsc(
             has_header=False,
             comment_prefix="#",
             new_columns=["ucsc", "length"],
-            schema={"uscc": pl.Utf8, "length": pl.Int64},
+            schema={"ucsc": pl.Utf8, "length": pl.Int64},
         )
 
     else:

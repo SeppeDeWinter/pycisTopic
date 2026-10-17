@@ -18,8 +18,9 @@ probabilities.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from importlib.metadata import PackageNotFoundError, version
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd

@@ -42,8 +42,10 @@ def get_tss_profile(
         Default: 10.
     minimum_signal_window
         Average signal in the tails of the flanking window around the TSS:
-           - ``[-flank_window, -flank_window + minimum_signal_window + 1]``
-           - ``[flank_window - minimum_signal_window + 1, flank_window]``
+
+        - ``[-flank_window, -flank_window + minimum_signal_window + 1]``
+        - ``[flank_window - minimum_signal_window + 1, flank_window]``
+
         is used to normalize the TSS enrichment.
         Default: ``100`` (average signal in ``[-2000, -1901]``, ``[1901, 2000]``
         around TSS if ``flank_window=2000``).

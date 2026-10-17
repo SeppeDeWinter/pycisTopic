@@ -248,7 +248,7 @@ def qc(
 def qc_filter_barcodes(
     sample_id: str,
     pycistopic_qc_output_dir: str | Path,
-    unique_fragments_threshold: int | None = None,
+    unique_fragments_threshold: float | None = None,
     tss_enrichment_threshold: float | None = None,
     frip_threshold: float | None = None,
 ):
@@ -261,7 +261,7 @@ def qc_filter_barcodes(
 
     print(
         f'Writing selected cell barcodes for "{sample_id}" based on QC statistics with:\n'
-        f"  - minimum unqiue fragments:\t{unique_fragments_threshold}\n"
+        f"  - minimum unique fragments:\t{unique_fragments_threshold}\n"
         f"  - minimum TSS threshold:\t{tss_enrichment_threshold}\n"
         f"  - minimum FRiP threshold:\t{frip_threshold}\n"
         f'to "{selected_cbs_filename}".'
@@ -286,7 +286,7 @@ def qc_filter_barcodes(
 def qc_plot(
     sample_id: str,
     pycistopic_qc_output_dir: str | Path,
-    unique_fragments_threshold: int | None = None,
+    unique_fragments_threshold: float | None = None,
     tss_enrichment_threshold: float | None = None,
     frip_threshold: float | None = None,
     plot_file_format: str = "png",
@@ -549,7 +549,7 @@ def add_parser_qc(subparsers: _SubParsersAction[ArgumentParser]):
         default="ncls",
         help="""
             Engine to use to calculate intersections/overlaps between fragments and regions.
-            Options: "ncls" or "ruranges" (faster).
+            Options: "ncls" or "ruranges" (faster, requires "pip install pycisTopic[ruranges]").
             Default: "ncls".
             """,
     )
@@ -612,9 +612,9 @@ def add_parser_qc(subparsers: _SubParsersAction[ArgumentParser]):
         "--fragments",
         dest="unique_fragments_threshold",
         action="store",
-        type=int,
+        type=float,
         required=False,
-        default=1000,
+        default=1000.0,
         help="Threshold for number of unique fragments in peaks. Default: 1000.",
     )
 
@@ -672,7 +672,7 @@ def add_parser_qc(subparsers: _SubParsersAction[ArgumentParser]):
         "--fragments",
         dest="unique_fragments_threshold",
         action="store",
-        type=int,
+        type=float,
         required=False,
         default=None,
         help="Threshold for number of unique fragments in peaks. Default: None (automatically determined).",

@@ -12,7 +12,7 @@ authors = [
 description = "pycisTopic is a Python module to simultaneously identify cell states and cis-regulatory topics from single cell epigenomics data."
 readme = "README.rst"
 version = "3.0"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 keywords = ["scATAC", "cell state", "topic modeling", "LDA", "enhancer"]
 license = { file = "LICENSE.txt" }
 classifiers = [
@@ -24,7 +24,6 @@ classifiers = [
   "Programming Language :: Python",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Topic :: Scientific/Engineering :: Bio-Informatics",
@@ -32,6 +31,7 @@ classifiers = [
 dependencies = [
     "anndata>=0.11.4",
     "diptest>=0.8.0",
+    "macs3>=3.0.5",
     "ncls>=0.0.70",
     "numba>=0.59.0",
     "numpy>=1.24.0",
@@ -55,13 +55,13 @@ docs = [
   "sphinx_copybutton",
   "sphinx_design",
   "sphinx_favicon",
-  "pandoc",
 ]
 development = ["mypy", "ruff", "pytest", "maturin"]
 plot = [
     "adjustText>=1.0.0",
     "matplotlib>=3.10.3",
 ]
+ruranges = ["ruranges>=0.2.7"]
 
 [project.urls]
 Homepage = "https://github.com/aertslab/pycisTopic"
@@ -73,7 +73,7 @@ Changelog = "https://github.com/aertslab/pycisTopic/releases"
 pycistopic = "pycisTopic.cli.pycistopic:main"
 
 [tool.ruff]
-target-version = "py38"
+target-version = "py312"
 line-length = 88
 fix = true
 

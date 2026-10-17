@@ -163,6 +163,36 @@ class TestComputeQcStats:
         assert insert_sizes["fragments_count"].sum() == fragments.height
         assert tss_sample.height == tss_per_cb.height == 2001
 
+    def test_ruranges_engine(self, qc_stats, fragments, peaks, tss_annotation):
+        pytest.importorskip("ruranges")
+        result = compute_qc_stats(
+            fragments_df_pl=fragments,
+            regions_df_pl=peaks,
+            tss_annotation=tss_annotation,
+            tss_flank_window=1000,
+            min_fragments_per_cb=10,
+            no_threads=2,
+            intersection_engine="ruranges",
+        )
+        stats, insert_sizes, tss_sample, tss_per_cb = result
+        # KDE values (pdf_values_*) depend on the row order through float rounding.
+        # The duplication ratio is constant in the test data (degenerate KDE).
+        expected_stats = qc_stats[0].sort("CB").drop("pdf_values_for_duplication_ratio")
+        stats = stats.sort("CB").drop("pdf_values_for_duplication_ratio")
+        for column in expected_stats.columns:
+            if column.startswith("pdf_values_for_"):
+                np.testing.assert_allclose(stats[column], expected_stats[column], rtol=1e-6)
+            else:
+                assert stats[column].equals(expected_stats[column]), column
+        assert insert_sizes.equals(qc_stats[1])
+        for expected_df, result_df in ((qc_stats[2], tss_sample), (qc_stats[3], tss_per_cb)):
+            result_df = result_df.select(expected_df.columns).sort("position_from_tss")
+            np.testing.assert_allclose(
+                result_df.to_numpy(),
+                expected_df.sort("position_from_tss").to_numpy(),
+                rtol=1e-12,
+            )
+
     def test_good_cells_score_higher(self, qc_stats):
         stats = qc_stats[0].with_columns(
             pl.col("CB").cast(pl.Utf8).str.starts_with("good").alias("good")

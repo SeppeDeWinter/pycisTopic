@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import math
 import sys
-from typing import Literal
 
 import numba
 import numpy as np
@@ -490,9 +489,10 @@ def find_highly_variable_regions(
     Find highly variable regions by using output of
     `calculate_per_region_mean_and_dispersion_on_normalized_imputed_acc`
     as input:
-      - `regions`
-      - `per_region_means_on_normalized_imputed_acc`
-      - `per_region_dispersions_on_normalized_imputed_acc`
+
+    - `regions`
+    - `per_region_means_on_normalized_imputed_acc`
+    - `per_region_dispersions_on_normalized_imputed_acc`
 
     Parameters
     ----------
@@ -526,7 +526,7 @@ def find_highly_variable_regions(
         Whether to plot dispersion versus mean values.
         If `True`, plot will be shown.
         if `str`, plot will be saved to the specified path.
-        If `False` or `None, plot will not be shown.
+        If `False` or `None`, plot will not be shown.
         Default: True
 
     Return
@@ -1028,7 +1028,7 @@ def get_nonzero_row_indices(x: npt.NDArray[np.float32]):
 
 def p_adjust_bh(p: npt.NDArray):
     """Benjamini-Hochberg p-value correction for multiple hypothesis testing."""
-    p = np.asarray(p, dtype='float')
+    p = np.asarray(p, dtype="float")
     by_descend = p.argsort()[::-1]
     by_orig = by_descend.argsort()
     steps = float(len(p)) / np.arange(len(p), 0, -1)

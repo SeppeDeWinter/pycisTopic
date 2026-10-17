@@ -4,7 +4,7 @@ import math
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Sequence
+from typing import TYPE_CHECKING
 
 import polars as pl
 
@@ -30,9 +30,10 @@ def read_regions_from_bed(bed_path: str | Path | os.PathLike) -> list[str]:
     Returns
     -------
     List of region names in 'chr:start-end' format.
+
     """
     region_names: list[str] = []
-    with open(bed_path, "r") as bed_file:
+    with open(bed_path) as bed_file:
         for line in bed_file:
             line = line.strip()
             if not line or line.startswith("#") or line.startswith("track"):
@@ -126,6 +127,7 @@ def filter_hv_regions_for_contrast(
     -------
     Subset of `highly_variable_regions` that have non-zero accessibility in at least
     one cell of (foreground + background).
+
     """
     import numpy as np
 
@@ -191,8 +193,8 @@ def get_contrast_barcodes_lists(
     -------
     Dictionary with foreground and background cell barcode lists.
     E.g., {"contrast_1": ([foreground_barcodes], [background_barcodes]), ...}
-    """
 
+    """
     # Read cell data
     df = (
         cell_data_tsv
@@ -256,7 +258,7 @@ def get_contrast_barcodes_lists(
             }
 
     # Format contrast_barcodes to have tuple of lists, since that's what find_diff_accessible_regions expects
-    contrast_barcodes_formatted = {c: (lists['foreground'], lists['background']) for c, lists in contrast_barcodes.items()}
+    contrast_barcodes_formatted = {c: (lists["foreground"], lists["background"]) for c, lists in contrast_barcodes.items()}
     return contrast_barcodes_formatted
 
 

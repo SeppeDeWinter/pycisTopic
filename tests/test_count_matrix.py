@@ -90,6 +90,23 @@ class TestCreateCountMatrix:
             ("chr2:50-150", "BBB___s1"),
         }
 
+    def test_ruranges_engine(self, small_files, mapping_files, count_matrix_prefix, tmp_path):
+        pytest.importorskip("ruranges")
+        sample_fragments, sample_barcodes = mapping_files
+        prefix = str(tmp_path / "out_ruranges")
+        create_count_matrix_from_fragment_files(
+            sample_to_fragments_file_mapping_tsv_filename=str(sample_fragments),
+            sample_to_cell_barcodes_file_mapping_tsv_filenames=str(sample_barcodes),
+            regions_bed_filename=str(small_files["regions"]),
+            output_prefix=prefix,
+            cb_end_to_remove="-1",
+            intersection_engine="ruranges",
+        )
+        expected = _read_matrix(count_matrix_prefix)
+        result = _read_matrix(prefix)
+        np.testing.assert_array_equal(result[0], expected[0])
+        assert result[1:] == expected[1:]
+
     def test_sample_without_barcodes(self, small_files, mapping_files, tmp_path):
         sample_fragments, _ = mapping_files
         sample_barcodes = tmp_path / "only_s1.tsv"

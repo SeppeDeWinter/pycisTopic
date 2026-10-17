@@ -1,9 +1,8 @@
 """
 Pseudobulk fragment files and peak calling with MACS3.
 
-Pseudobulk fragment files are created with ``scatac_fragment_tools``. MACS3 is called
-as an external program (``macs3`` executable), as it is not installable as a wheel;
-install it, for example, with ``conda install -c bioconda macs3``.
+Pseudobulk fragment files are created with ``scatac_fragment_tools``. Peaks are called
+with the ``macs3`` executable, which is installed together with pycisTopic.
 """
 
 from __future__ import annotations
@@ -11,12 +10,14 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Mapping, Sequence
+from typing import TYPE_CHECKING
 
 import polars as pl
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
     from pathlib import Path
 
     import pandas as pd
@@ -68,7 +69,7 @@ def get_cell_type_barcodes_per_sample(
         )
     samples = list(samples)
     cell_type_barcodes: dict[str, dict[str, list[str]]] = {s: {} for s in samples}
-    for cell_barcode, group in zip(cell_barcodes, groups):
+    for cell_barcode, group in zip(cell_barcodes, groups, strict=True):
         if group is None or group != group:  # Skip cells without group (NaN).
             continue
         if cb_sample_separator and cb_sample_separator in cell_barcode:
@@ -209,11 +210,16 @@ def find_pseudobulk_fragment_files(directory: str | Path) -> dict[str, str]:
 
 def _check_macs3(macs3_path: str) -> str:
     executable = shutil.which(macs3_path)
+    if executable is None and os.sep not in macs3_path:
+        # MACS3 installed in the same environment as pycisTopic, which is not
+        # necessarily on PATH (e.g. when running a notebook kernel).
+        executable = shutil.which(
+            macs3_path, path=os.path.dirname(os.path.realpath(sys.executable))
+        ) or shutil.which(macs3_path, path=os.path.dirname(sys.executable))
     if executable is None:
         raise FileNotFoundError(
-            f'MACS3 executable "{macs3_path}" not found. Install MACS3 (e.g. '
-            '"conda install -c bioconda macs3" or "pip install macs3") or provide the '
-            "path to the macs3 executable."
+            f'MACS3 executable "{macs3_path}" not found. Install MACS3 ("pip install '
+            'macs3") or provide the path to the macs3 executable.'
         )
     return executable
 

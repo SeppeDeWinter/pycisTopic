@@ -170,7 +170,7 @@ class TestCallPeaksMacs3:
             call_peaks_macs3({"fail": "x"}, tmp_path, "hs", macs3_path=fake_macs3)
 
     def test_macs3_not_found(self, tmp_path):
-        with pytest.raises(FileNotFoundError, match="bioconda macs3"):
+        with pytest.raises(FileNotFoundError, match="pip install macs3"):
             call_peaks_macs3({"B": "x"}, tmp_path, "hs", macs3_path="no_such_macs3")
 
 

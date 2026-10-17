@@ -31,13 +31,13 @@ def run_subset_count_matrix(args):
     # Load cell barcodes to keep if provided.
     cell_barcodes_to_keep = None
     if args.cell_barcodes_to_keep is not None:
-        with open(args.cell_barcodes_to_keep, "r") as f:
+        with open(args.cell_barcodes_to_keep) as f:
             cell_barcodes_to_keep = [line.strip() for line in f]
 
     # Load region IDs to keep if provided.
     region_ids_to_keep = None
     if args.region_ids_to_keep is not None:
-        with open(args.region_ids_to_keep, "r") as f:
+        with open(args.region_ids_to_keep) as f:
             region_ids_to_keep = [line.strip() for line in f]
 
     subset_accessibility_matrix(
@@ -177,7 +177,7 @@ def add_parser_count_matrix(subparsers: _SubParsersAction[ArgumentParser]):
         default="ncls",
         help="""
                 Engine to use to calculate intersections/overlaps between fragments and regions.
-                Options: "ncls" or "ruranges" (faster).
+                Options: "ncls" or "ruranges" (faster, requires "pip install pycisTopic[ruranges]").
                 Default: "ncls".
                 """,
     )
