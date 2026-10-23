@@ -321,7 +321,9 @@ def _proportion_ztest_larger(count: int, nobs: int, value: float) -> float:
 
 def gini_coefficient(x):
     """Compute Gini coefficient of array of values."""
-    diffsum = 0
-    for i, xi in enumerate(x[:-1], 1):
-        diffsum += np.sum(np.abs(xi - x[i:]))
-    return diffsum / (len(x) ** 2 * np.mean(x))
+    # For ascending sorted x (1-based index i):
+    #   sum_{i < j} |x_i - x_j| = sum_i (2i - n - 1) * x_i
+    # and n^2 * mean(x) = n * sum(x). All zeros gives NaN (0 / 0).
+    x = np.sort(np.asarray(x, dtype=np.float64))
+    n = len(x)
+    return np.sum((2 * np.arange(1, n + 1) - n - 1) * x) / (n * np.sum(x))

@@ -30,6 +30,49 @@ def test_gini_coefficient():
     assert gini_coefficient(x) == pytest.approx(0.99)
 
 
+def _gini_coefficient_pairwise(x):
+    """Gini coefficient computed from all pairwise differences (old implementation)."""
+    diffsum = 0
+    for i, xi in enumerate(x[:-1], 1):
+        diffsum += np.sum(np.abs(xi - x[i:]))
+    return diffsum / (len(x) ** 2 * np.mean(x))
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+@pytest.mark.parametrize("n", [2, 7, 500])
+def test_gini_coefficient_matches_pairwise(seed, n):
+    rng = np.random.default_rng(seed)
+    for x in (
+        rng.dirichlet(np.full(n, 0.3)),
+        rng.exponential(size=n),
+        rng.integers(0, 5, size=n).astype(np.float64) + 0.5,
+    ):
+        assert gini_coefficient(x) == pytest.approx(_gini_coefficient_pairwise(x))
+        # Order of the values does not matter.
+        assert gini_coefficient(x[::-1]) == pytest.approx(gini_coefficient(x))
+
+
+@pytest.mark.parametrize(
+    ("x", "expected"),
+    [
+        (np.array([3.0]), 0.0),
+        (np.full(20, 0.25), 0.0),
+        (np.array([0.0, 0.0, 5.0, 0.0]), 0.75),
+        (np.array([1, 2, 3, 4]), 0.25),
+    ],
+)
+def test_gini_coefficient_edge_cases(x, expected):
+    assert gini_coefficient(x) == pytest.approx(expected, abs=1e-12)
+    assert _gini_coefficient_pairwise(x) == pytest.approx(expected, abs=1e-12)
+
+
+def test_gini_coefficient_all_zeros_is_nan():
+    x = np.zeros(10)
+    with np.errstate(invalid="ignore"):
+        assert np.isnan(_gini_coefficient_pairwise(x))
+        assert np.isnan(gini_coefficient(x))
+
+
 class TestTopicQcOnAnnData:
     @pytest.fixture
     def adata(self, rng):
